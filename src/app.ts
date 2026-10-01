@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import formbody from "@fastify/formbody";
 import auth0 from "@auth0/auth0-fastify";
 import { config } from "./config.js";
 import { registerHealthRoutes } from "./routes/health.js";
@@ -12,6 +13,7 @@ import { registerSupplierRoutes } from "./routes/suppliers.js";
 import { registerPhonePoolRoutes } from "./routes/phone-pool.js";
 import { registerCollectorRoutes } from "./routes/collector.js";
 import { registerDashboardRoutes } from "./routes/dashboard.js";
+import { registerTwilioRoutes } from "./routes/twilio.js";
 
 export function buildApp() {
   const app = Fastify({
@@ -21,6 +23,7 @@ export function buildApp() {
   });
   const allowedOrigins = config.CORS_ORIGINS.split(",").map((v) => v.trim()).filter(Boolean);
   app.register(cors, { origin: allowedOrigins.length ? allowedOrigins : false, credentials: false });
+  app.register(formbody);
   const auth0Configured = Boolean(
     config.AUTH0_DOMAIN &&
     config.AUTH0_CLIENT_ID &&
@@ -60,6 +63,7 @@ export function buildApp() {
   app.register(registerEventRoutes);
   app.register(registerCallRoutes);
   app.register(registerSecondRingRoutes);
+  app.register(registerTwilioRoutes);
   app.register(registerLeadRoutes);
   app.register(registerSupplierRoutes);
   app.register(registerPhonePoolRoutes);

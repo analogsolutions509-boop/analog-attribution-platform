@@ -97,17 +97,33 @@ async function readResponseWithLimit(response: Response): Promise<Uint8Array> {
   return result;
 }
 
+export type RecordingAuth = {
+  username: string;
+  password: string;
+};
+
 export async function downloadRecording(
   recordingUrl: string,
-  timeoutMs = 20_000
+  timeoutMs = 20_000,
+  auth?: RecordingAuth
 ): Promise<{ bytes: Uint8Array; mimeType: string }> {
   let currentUrl = recordingUrl;
+  const initialHostname = new URL(recordingUrl).hostname;
   for (let redirectCount = 0; redirectCount <= 3; redirectCount++) {
     await assertSafeResolvedHost(currentUrl);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(currentUrl, { method: "GET", redirect: "manual", signal: controller.signal });
+      const headers: Record<string, string> = {};
+      if (auth && new URL(currentUrl).hostname === initialHostname) {
+        headers.authorization = `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString("base64")}`;
+      }
+      const response = await fetch(currentUrl, {
+        method: "GET",
+        headers,
+        redirect: "manual",
+        signal: controller.signal
+      });
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get("location");
         if (!location || redirectCount === 3) throw new Error("recording_redirect_limit");

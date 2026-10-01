@@ -7,6 +7,7 @@ import { downloadRecording, extensionForMimeType } from "./call-recording.js";
 import { transcribeBytes } from "./call-intelligence/transcribe.js";
 import { deliverAnalogOSEvent } from "./analog-os.js";
 import { markAnalogOSEventAttempt, markAnalogOSEventSent, recoverAnalogOSEvents } from "./analog-os-outbox.js";
+import { config } from "./config.js";
 
 type JobEnvelope = {
   jobId?: string;
@@ -101,14 +102,17 @@ async function processAnalogOSEvent(outboxId: string) {
 
 async function processCall(callId: string) {
   const result = await db.query(
-    "SELECT recording_source_url, recording_mime_type FROM calls WHERE id=$1",
+    "SELECT provider, recording_source_url, recording_mime_type FROM calls WHERE id=$1",
     [callId]
   );
   if (!result.rowCount) throw new Error("call_not_found");
   const call = result.rows[0];
   if (!call.recording_source_url) throw new Error("recording_source_url_missing");
 
-  const recording = await downloadRecording(call.recording_source_url);
+  const recordingAuth = call.provider === "twilio" && config.TWILIO_ACCOUNT_SID && config.TWILIO_AUTH_TOKEN
+    ? { username: config.TWILIO_ACCOUNT_SID, password: config.TWILIO_AUTH_TOKEN }
+    : undefined;
+  const recording = await downloadRecording(call.recording_source_url, 20_000, recordingAuth);
   const mimeType = call.recording_mime_type ?? recording.mimeType;
   const key = await archiveRecording(
     callId,

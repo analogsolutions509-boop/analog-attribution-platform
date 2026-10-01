@@ -32,6 +32,9 @@ const envSchema = z.object({
   RECORDING_MAX_BYTES: z.coerce.number().int().min(1048576).max(104857600).default(26214400),
   CORS_ORIGINS: z.string().default("*"),
   PUBLIC_API_URL: z.string().url().optional(),
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().min(1).optional(),
+  TWILIO_FORWARD_TO: z.string().optional(),
   ANALOG_OS_WEBHOOK_URL: z.string().url().optional(),
   ANALOG_OS_WEBHOOK_SECRET: z.string().optional()
 });
