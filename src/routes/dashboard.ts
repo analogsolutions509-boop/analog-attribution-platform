@@ -38,6 +38,21 @@ function setSession(reply: FastifyReply, username: string) {
   reply.header("Set-Cookie", `${COOKIE_NAME}=${encodeURIComponent(session)}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=43200`);
 }
 
+export function buildDashboardLeadsQuery(where: string, limitPosition: number): string {
+  return `
+      SELECT l.id,l.site_id,l.status,l.source,l.customer_name,l.company_name,l.customer_phone,
+             l.customer_email,l.service_type,l.summary,l.created_at,l.updated_at,
+             s.name AS site_name,s.hostname,
+             COUNT(c.id)::int AS call_count,
+             MAX(c.created_at) AS last_call_at,
+             (SELECT c2.id FROM calls c2 WHERE c2.lead_id=l.id ORDER BY c2.created_at DESC, c2.id DESC LIMIT 1) AS latest_call_id
+      FROM leads l JOIN sites s ON s.id=l.site_id
+      ${where}
+      GROUP BY l.id,s.name,s.hostname
+      ORDER BY l.created_at DESC LIMIT $${limitPosition}
+    `;
+}
+
 export async function registerDashboardRoutes(app: FastifyInstance) {
   app.get("/dashboard", async (_request, reply) => {
     const html = await readFile(join(UI_ROOT, "dashboard.html"), "utf8");
@@ -158,19 +173,7 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
     let where = "";
     if (request.query.siteId) { params.push(request.query.siteId); where = `WHERE l.site_id=$${params.length}`; }
     params.push(limit);
-    const result = await db.query(`
-      SELECT l.id,l.site_id,l.status,l.source,l.customer_name,l.company_name,l.customer_phone,
-             l.customer_email,l.service_type,l.summary,l.created_at,l.updated_at,
-             s.name AS site_name,s.hostname,
-             COUNT(c.id)::int AS call_count,
-             MAX(c.created_at) AS last_call_at,
-             MAX(c.id) FILTER (WHERE c.created_at = (SELECT MAX(c2.created_at) FROM calls c2 WHERE c2.lead_id=l.id)) AS latest_call_id
-      FROM leads l JOIN sites s ON s.id=l.site_id
-      LEFT JOIN calls c ON c.lead_id=l.id
-      ${where}
-      GROUP BY l.id,s.name,s.hostname
-      ORDER BY l.created_at DESC LIMIT $${params.length}
-    `, params);
+    const result = await db.query(buildDashboardLeadsQuery(where, params.length), params);
     return reply.send({ leads: result.rows });
   });
 
