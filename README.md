@@ -52,7 +52,7 @@ SecondRing's public site documents call recording, secure cloud recording storag
 
 ## Deployment
 Railway production project: Analog Attribution Platform.
-The production environment has PostgreSQL, Redis, an API service, and a worker service configured. API and worker deploy from the GitHub repository's `main` branch. The provider webhook endpoint is `POST /v1/providers/secondring/webhook` and requires the production provider webhook secret.
+The production environment has PostgreSQL, Redis, an API service, and a worker service configured. API and worker deploy from the GitHub repository's `main` branch, with the API configured to watch the repository for source changes. The provider webhook endpoint is `POST /v1/providers/secondring/webhook` and requires the production provider webhook secret.
 
 ## Security principles
 - No public database or Redis
