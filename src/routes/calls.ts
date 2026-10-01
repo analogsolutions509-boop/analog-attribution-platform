@@ -2,7 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { resolveSite } from "../auth.js";
 import { db } from "../db.js";
 import { createJob } from "../jobs.js";
-import { attachRecording, createRecordingDownloadUrl, upsertIncomingCall } from "../calls.js";
+import { attachRecording, upsertIncomingCall } from "../calls.js";
+import { createRecordingDownloadUrl } from "../storage/r2.js";
 
 export async function registerCallRoutes(app: FastifyInstance) {
   app.post("/v1/calls/events", async (request, reply) => {
