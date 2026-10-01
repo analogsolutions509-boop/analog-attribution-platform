@@ -13,6 +13,7 @@
     "migrate": "tsx src/migrate.ts"
   },
   "dependencies": {
+    "@auth0/auth0-fastify": "^1.6.0",
     "@aws-sdk/client-s3": "^3.906.0",
     "@aws-sdk/s3-request-presigner": "^3.906.0",
     "@fastify/cors": "^10.0.2",

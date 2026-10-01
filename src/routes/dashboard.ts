@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { config } from "../config.js";
 import { db } from "../db.js";
 import { verifyDashboardCredentials, createDashboardSession, verifyDashboardSession } from "../dashboard-auth.js";
+import { isAllowedDashboardEmail } from "../dashboard-access.js";
 import { createRecordingDownloadUrl } from "../storage/r2.js";
 
 const COOKIE_NAME = "analog_dashboard_session";
@@ -18,19 +19,56 @@ function parseCookies(value: string | undefined): Record<string, string> {
   }).filter(([key]) => key));
 }
 
-function dashboardUser(request: FastifyRequest): string | null {
+type DashboardIdentity =
+  | { kind: "auth0"; username: string; email: string; name?: string; picture?: string }
+  | { kind: "legacy"; username: string }
+  | { kind: "denied"; email: string; reason: "access_not_configured" | "email_not_verified" };
+
+async function dashboardIdentity(app: FastifyInstance, request: FastifyRequest, reply: FastifyReply): Promise<DashboardIdentity | null> {
+  const auth0Enabled = Boolean(
+    config.AUTH0_DOMAIN &&
+    config.AUTH0_CLIENT_ID &&
+    config.AUTH0_CLIENT_SECRET &&
+    config.AUTH0_SESSION_SECRET
+  );
+
+  if (auth0Enabled && app.auth0Client) {
+    const session = await app.auth0Client.getSession({ request, reply });
+    const user = session?.user;
+    if (user?.sub) {
+      const email = typeof user.email === "string" ? user.email.trim().toLowerCase() : "";
+      if (!email) return { kind: "denied", email: "", reason: "access_not_configured" };
+      if (user.email_verified === false) return { kind: "denied", email, reason: "email_not_verified" };
+      if (!isAllowedDashboardEmail(email, config.ANALOG_DASHBOARD_ALLOWED_EMAILS, config.ANALOG_DASHBOARD_ALLOW_ANY_AUTH0_USER)) {
+        return { kind: "denied", email, reason: "access_not_configured" };
+      }
+      return {
+        kind: "auth0",
+        username: email,
+        email,
+        name: typeof user.name === "string" ? user.name : undefined,
+        picture: typeof user.picture === "string" ? user.picture : undefined
+      };
+    }
+  }
+
   if (!config.ANALOG_DASHBOARD_PASSWORD) return null;
   const cookies = parseCookies(request.headers.cookie);
-  return verifyDashboardSession(cookies[COOKIE_NAME], config.ANALOG_DASHBOARD_PASSWORD);
+  const username = verifyDashboardSession(cookies[COOKIE_NAME], config.ANALOG_DASHBOARD_PASSWORD);
+  return username ? { kind: "legacy", username } : null;
 }
 
-function requireDashboard(request: FastifyRequest, reply: FastifyReply): string | null {
-  const user = dashboardUser(request);
-  if (!user) {
+async function requireDashboard(app: FastifyInstance, request: FastifyRequest, reply: FastifyReply): Promise<string | null> {
+  const identity = await dashboardIdentity(app, request, reply);
+  if (!identity) {
     reply.code(401).send({ error: "dashboard_auth_required" });
     return null;
   }
-  return user;
+  if (identity.kind === "denied") {
+    reply.code(403).send({ error: identity.reason, email: identity.email });
+    return null;
+  }
+  return identity.username;
 }
 
 function setSession(reply: FastifyReply, username: string) {
@@ -55,6 +93,68 @@ export function buildDashboardLeadsQuery(where: string, limitPosition: number): 
 }
 
 export async function registerDashboardRoutes(app: FastifyInstance) {
+  const auth0Enabled = Boolean(
+    config.AUTH0_DOMAIN &&
+    config.AUTH0_CLIENT_ID &&
+    config.AUTH0_CLIENT_SECRET &&
+    config.AUTH0_SESSION_SECRET
+  );
+
+  if (auth0Enabled) {
+    const redirectToAuth0 = async (
+      request: FastifyRequest,
+      reply: FastifyReply,
+      authorizationParams: Record<string, string>
+    ) => {
+      if (!app.auth0Client) return reply.code(503).send({ error: "auth0_not_ready" });
+      const redirectUri = new URL("/auth/callback", config.AUTH0_APP_BASE_URL).toString();
+      const authorizationUrl = await app.auth0Client.startInteractiveLogin(
+        {
+          authorizationParams: { redirect_uri: redirectUri, ...authorizationParams },
+          appState: { returnTo: "/dashboard" }
+        },
+        { request, reply }
+      );
+      return reply.redirect(authorizationUrl.href);
+    };
+
+    app.get("/auth/google", async (request, reply) =>
+      redirectToAuth0(request, reply, { connection: "google-oauth2" })
+    );
+    app.get("/auth/signup", async (request, reply) =>
+      redirectToAuth0(request, reply, { screen_hint: "signup" })
+    );
+  }
+
+  app.get("/v1/dashboard/auth/status", async (request, reply) => {
+    const identity = await dashboardIdentity(app, request, reply);
+    if (!identity) {
+      return reply.send({
+        auth0Enabled,
+        authenticated: false,
+        legacyLoginAvailable: Boolean(config.ANALOG_DASHBOARD_PASSWORD)
+      });
+    }
+    if (identity.kind === "denied") {
+      return reply.send({
+        auth0Enabled,
+        authenticated: true,
+        accessGranted: false,
+        email: identity.email,
+        error: identity.reason
+      });
+    }
+    return reply.send({
+      auth0Enabled,
+      authenticated: true,
+      accessGranted: true,
+      provider: identity.kind,
+      user: identity.kind === "auth0"
+        ? { email: identity.email, name: identity.name ?? null, picture: identity.picture ?? null }
+        : { username: identity.username }
+    });
+  });
+
   app.get("/dashboard", async (_request, reply) => {
     const html = await readFile(join(UI_ROOT, "dashboard.html"), "utf8");
     return reply.type("text/html; charset=utf-8").send(html);
@@ -83,13 +183,15 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
   });
 
   app.post("/v1/dashboard/logout", async (request, reply) => {
-    if (!dashboardUser(request)) return reply.code(401).send({ error: "dashboard_auth_required" });
+    const identity = await dashboardIdentity(app, request, reply);
+    if (!identity) return reply.code(401).send({ error: "dashboard_auth_required" });
+    if (identity.kind !== "legacy") return reply.code(400).send({ error: "use_auth0_logout" });
     reply.header("Set-Cookie", `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=0`);
     return reply.send({ ok: true });
   });
 
   app.get<{ Querystring: { siteId?: string } }>("/v1/dashboard/summary", async (request, reply) => {
-    if (!requireDashboard(request, reply)) return;
+    if (!(await requireDashboard(app, request, reply))) return;
     const params: unknown[] = [];
     let siteFilter = "";
     if (request.query.siteId) {
@@ -119,7 +221,7 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Querystring: { limit?: string; siteId?: string } }>("/v1/dashboard/calls", async (request, reply) => {
-    if (!requireDashboard(request, reply)) return;
+    if (!(await requireDashboard(app, request, reply))) return;
     const limit = Math.min(Math.max(Number(request.query.limit ?? 25) || 25, 1), 100);
     const siteId = request.query.siteId;
     const params: unknown[] = [];
@@ -144,7 +246,7 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Params: { callId: string } }>("/v1/dashboard/calls/:callId", async (request, reply) => {
-    if (!requireDashboard(request, reply)) return;
+    if (!(await requireDashboard(app, request, reply))) return;
     const callResult = await db.query(`
       SELECT c.*,s.name AS site_name,s.hostname
       FROM calls c JOIN sites s ON s.id=c.site_id WHERE c.id=$1 LIMIT 1
@@ -168,7 +270,7 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Querystring: { limit?: string; siteId?: string } }>("/v1/dashboard/leads", async (request, reply) => {
-    if (!requireDashboard(request, reply)) return;
+    if (!(await requireDashboard(app, request, reply))) return;
     const limit = Math.min(Math.max(Number(request.query.limit ?? 25) || 25, 1), 100);
     const params: unknown[] = [];
     let where = "";
@@ -179,7 +281,7 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
   });
 
   app.get("/v1/dashboard/sites", async (request, reply) => {
-    if (!requireDashboard(request, reply)) return;
+    if (!(await requireDashboard(app, request, reply))) return;
     const result = await db.query(`
       SELECT s.id,s.name,s.hostname,s.status,s.created_at,
              (SELECT COUNT(*) FROM tracking_numbers tn WHERE tn.site_id=s.id AND tn.active)::int AS tracking_numbers,
@@ -191,7 +293,7 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
   });
 
   app.get("/v1/dashboard/system", async (request, reply) => {
-    if (!requireDashboard(request, reply)) return;
+    if (!(await requireDashboard(app, request, reply))) return;
     const [jobs, outbox] = await Promise.all([
       db.query(`SELECT status,COUNT(*)::int AS count FROM jobs GROUP BY status ORDER BY status`),
       db.query(`SELECT status,COUNT(*)::int AS count FROM analog_os_outbox GROUP BY status ORDER BY status`)
