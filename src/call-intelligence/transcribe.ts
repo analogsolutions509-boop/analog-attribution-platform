@@ -48,7 +48,7 @@ async function transcribeWithDeepgram(
       Authorization: `Token ${config.DEEPGRAM_API_KEY}`,
       "Content-Type": mimeType
     },
-    body: bytes
+    body: Buffer.from(bytes)
   });
   if (!response.ok) {
     throw new Error(`deepgram_transcription_failed:${response.status}`);
@@ -79,7 +79,7 @@ async function transcribeWithOpenAI(
 ): Promise<DiarizedTranscript> {
   if (!config.OPENAI_API_KEY) throw new Error("openai_not_configured");
   const form = new FormData();
-  form.append("file", new Blob([bytes], { type: mimeType }), "call.audio");
+  form.append("file", new Blob([Buffer.from(bytes)], { type: mimeType }), "call.audio");
   form.append("model", config.OPENAI_TRANSCRIPTION_MODEL);
   form.append("response_format", "json");
 
@@ -122,3 +122,4 @@ export async function transcribeFile(
 
   return transcribeWithOpenAI(bytes, mimeType);
 }
+
