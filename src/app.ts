@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerEnrollmentRoutes } from "./routes/enrollment.js";
 import { registerEventRoutes } from "./routes/events.js";
+import { registerCallRoutes } from "./routes/calls.js";
 
 export function buildApp() {
   const app = Fastify({
@@ -14,5 +15,6 @@ export function buildApp() {
   app.register(registerHealthRoutes);
   app.register(registerEnrollmentRoutes);
   app.register(registerEventRoutes);
+  app.register(registerCallRoutes);
   return app;
 }
