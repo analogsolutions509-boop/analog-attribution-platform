@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { config } from "../config.js";
 import { db } from "../db.js";
 import { verifyDashboardCredentials, createDashboardSession, verifyDashboardSession } from "../dashboard-auth.js";
-import { isAllowedDashboardEmail } from "../dashboard-access.js";
+import { getDashboardAccessMessage, isAllowedDashboardEmail } from "../dashboard-access.js";
 import { createRecordingDownloadUrl } from "../storage/r2.js";
 
 const COOKIE_NAME = "analog_dashboard_session";
@@ -141,7 +141,8 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
         authenticated: true,
         accessGranted: false,
         email: identity.email,
-        error: identity.reason
+        error: identity.reason,
+        message: getDashboardAccessMessage(identity.email, identity.reason)
       });
     }
     return reply.send({

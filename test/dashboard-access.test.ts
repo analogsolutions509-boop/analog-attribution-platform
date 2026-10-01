@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isAllowedDashboardEmail, normalizeDashboardEmail } from "../src/dashboard-access.js";
+import {
+  getDashboardAccessMessage,
+  isAllowedDashboardEmail,
+  normalizeDashboardEmail
+} from "../src/dashboard-access.js";
 
 test("normalizes dashboard emails for case-insensitive matching", () => {
   assert.equal(normalizeDashboardEmail(" Owner@Example.COM "), "owner@example.com");
@@ -18,4 +22,15 @@ test("allows any authenticated user only when explicitly enabled", () => {
 
 test("denies missing email", () => {
   assert.equal(isAllowedDashboardEmail("", "owner@example.com", true), false);
+});
+
+test("explains which authenticated account was denied dashboard access", () => {
+  assert.equal(
+    getDashboardAccessMessage("owner@example.com", "access_not_configured"),
+    "Authenticated as owner@example.com, but this account is not authorized for dashboard access."
+  );
+  assert.equal(
+    getDashboardAccessMessage("owner@example.com", "email_not_verified"),
+    "Authenticated as owner@example.com, but the email address is not verified."
+  );
 });
