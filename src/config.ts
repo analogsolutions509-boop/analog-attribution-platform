@@ -7,6 +7,7 @@ const envSchema = z.object({
   REDIS_URL: z.string().min(1),
   ANALOG_SITE_KEY_SECRET: z.string().min(16),
   ANALOG_ENROLLMENT_SECRET: z.string().min(16),
+  ANALOG_PROVIDER_WEBHOOK_SECRET: z.string().min(16).optional(),
   OPENAI_API_KEY: z.string().min(1).optional(),
   OPENAI_TRANSCRIPTION_MODEL: z.string().default("gpt-transcribe"),
   OPENAI_INTELLIGENCE_MODEL: z.string().default("gpt-5.6-luna"),
