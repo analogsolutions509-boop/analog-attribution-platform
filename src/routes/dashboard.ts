@@ -47,6 +47,7 @@ export function buildDashboardLeadsQuery(where: string, limitPosition: number): 
              MAX(c.created_at) AS last_call_at,
              (SELECT c2.id FROM calls c2 WHERE c2.lead_id=l.id ORDER BY c2.created_at DESC, c2.id DESC LIMIT 1) AS latest_call_id
       FROM leads l JOIN sites s ON s.id=l.site_id
+      LEFT JOIN calls c ON c.lead_id=l.id
       ${where}
       GROUP BY l.id,s.name,s.hostname
       ORDER BY l.created_at DESC LIMIT $${limitPosition}
