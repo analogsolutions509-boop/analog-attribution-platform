@@ -3,6 +3,7 @@ import { resolveSite } from "../auth.js";
 import { db } from "../db.js";
 import { createJob } from "../jobs.js";
 import { attachRecording, upsertIncomingCall } from "../calls.js";
+import { isSafeRecordingUrl } from "../call-recording.js";
 import { createRecordingDownloadUrl } from "../storage/r2.js";
 import { attributeCallToLead } from "../leads.js";
 
@@ -17,6 +18,9 @@ export async function registerCallRoutes(app: FastifyInstance) {
     }
     if (typeof body.provider_call_id !== "string") {
       return reply.code(400).send({ error: "provider_call_id_required" });
+    }
+    if (typeof body.recording_url === "string" && !isSafeRecordingUrl(body.recording_url)) {
+      return reply.code(400).send({ error: "secure_recording_url_required" });
     }
 
     const callId = await upsertIncomingCall({
@@ -50,7 +54,7 @@ export async function registerCallRoutes(app: FastifyInstance) {
     if (!site) return reply.code(401).send({ error: "invalid_site_key" });
 
     const body = request.body as Record<string, unknown>;
-    if (typeof body.recording_url !== "string" || !body.recording_url.startsWith("https://")) {
+    if (typeof body.recording_url !== "string" || !isSafeRecordingUrl(body.recording_url)) {
       return reply.code(400).send({ error: "secure_recording_url_required" });
     }
 
@@ -65,7 +69,7 @@ export async function registerCallRoutes(app: FastifyInstance) {
       body.recording_url,
       typeof body.recording_mime_type === "string" ? body.recording_mime_type : undefined
     );
-    await createJob("call.process", "call", request.params.callId);
+    await createJob("call.process", "call", request.params.callId, {}, { forceRequeue: true });
     return reply.code(202).send({ ok: true, call_id: request.params.callId, status: "recording_ready" });
   });
 
