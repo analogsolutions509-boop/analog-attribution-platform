@@ -2,37 +2,65 @@ import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
 import { db } from "../db.js";
 import { executeWazoTransfer, getWazoClient } from "../telephony.js";
-import { normalizeWazoEvent, verifyWazoWebhook } from "../providers/wazo.js";
+import { normalizeWazoEvent, verifyWazoWebhook, verifyWazoWebhookToken } from "../providers/wazo.js";
 import { queueAnalogOSEvent } from "../analog-os-outbox.js";
 import { createJob } from "../jobs.js";
 import { attributeCallToLead } from "../leads.js";
 import { requireDashboard } from "./dashboard.js";
 
+const WAZO_CALL_EVENTS = new Set(["call_created", "call_updated", "call_ended"]);
+
+type WazoWebhookOptions = {
+  callbackEvent?: string;
+  callbackToken?: string;
+  legacyHmac?: string;
+};
+
 export async function registerTelephonyRoutes(app: FastifyInstance) {
-  app.post("/v1/providers/wazo/webhook", async (request, reply) => {
+  const handleWazoWebhook = async (request: any, reply: any, options: WazoWebhookOptions) => {
     const raw = JSON.stringify(request.body ?? {});
-    if (!verifyWazoWebhook(raw, typeof request.headers["x-wazo-signature"] === "string" ? request.headers["x-wazo-signature"] : undefined, config.WAZO_WEBHOOK_SECRET ?? "")) {
+
+    if (options.callbackToken !== undefined) {
+      if (!verifyWazoWebhookToken(options.callbackToken, config.WAZO_WEBHOOK_SECRET ?? "")) {
+        return reply.code(401).send({error:"invalid_wazo_callback_token"});
+      }
+      if (!options.callbackEvent || !WAZO_CALL_EVENTS.has(options.callbackEvent)) {
+        return reply.code(400).send({error:"unsupported_wazo_event"});
+      }
+    } else if (!verifyWazoWebhook(raw, options.legacyHmac, config.WAZO_WEBHOOK_SECRET ?? "")) {
       return reply.code(401).send({error:"invalid_wazo_signature"});
     }
-    const event = normalizeWazoEvent(request.body);
+
+    const event = normalizeWazoEvent(request.body, options.callbackEvent);
     if (!event.providerCallId) return reply.code(400).send({error:"provider_call_id_required"});
+
     const existing = await db.query("SELECT id,site_id FROM calls WHERE provider='wazo' AND provider_call_id=$1 LIMIT 1",[event.providerCallId]);
     if (existing.rowCount) {
       const callId=existing.rows[0].id as string;
-      await db.query("UPDATE calls SET caller_number=COALESCE($2,caller_number),called_number=COALESCE($3,called_number),direction=COALESCE($4,direction),started_at=COALESCE($5,started_at),ended_at=COALESCE($6,ended_at),duration_seconds=COALESCE($7,duration_seconds),status=$8,recording_source_url=COALESCE($9,recording_source_url),updated_at=NOW() WHERE id=$1",[callId,event.callerNumber??null,event.calledNumber??null,event.direction??null,event.startedAt??null,event.endedAt??null,event.durationSeconds??null,event.event||"updated",event.recordingUrl??null]);
+      await db.query("UPDATE calls SET caller_number=COALESCE($2,caller_number),called_number=COALESCE($3,called_number),direction=COALESCE($4,direction),started_at=COALESCE($5,started_at),ended_at=COALESCE($6,ended_at),duration_seconds=COALESCE($7,duration_seconds),status=$8,recording_source_url=COALESCE($9,recording_source_url),updated_at=NOW() WHERE id=$1",[callId,event.callerNumber??null,event.calledNumber??null,event.direction??null,event.startedAt??null,event.endedAt??null,event.durationSeconds??null,(event.status ?? event.event) || "updated",event.recordingUrl??null]);
       if(event.recordingUrl) await createJob("call.process","call",callId,{}, {forceRequeue:true});
       await attributeCallToLead(callId,existing.rows[0].site_id,event.callerNumber,event.startedAt,event.calledNumber);
       return reply.send({ok:true,updated:true,call_id:callId});
     }
+
     const number = event.calledNumber?.replace(/\D/g,"") ?? "";
     const site = await db.query("SELECT s.id,s.name,s.hostname FROM tracking_numbers tn JOIN sites s ON s.id=tn.site_id WHERE tn.active AND regexp_replace(tn.phone_number,'\\D','','g')=$1 LIMIT 1",[number]);
     if (!site.rowCount) return reply.code(422).send({error:"site_resolution_failed"});
     const result = await db.query(`INSERT INTO calls(site_id,provider,provider_call_id,caller_number,called_number,direction,started_at,ended_at,duration_seconds,status,recording_source_url)
       VALUES($1,'wazo',$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,[
         site.rows[0].id,event.providerCallId,event.callerNumber ?? null,event.calledNumber ?? null,event.direction ?? null,
-        event.startedAt ?? null,event.endedAt ?? null,event.durationSeconds ?? null,event.event || "received",event.recordingUrl ?? null
+        event.startedAt ?? null,event.endedAt ?? null,event.durationSeconds ?? null,(event.status ?? event.event) || "received",event.recordingUrl ?? null
       ]);
     return reply.code(202).send({ok:true,call_id:result.rows[0].id,event:event.event});
+  };
+
+  app.post("/v1/providers/wazo/webhook", async (request, reply) => {
+    const signature = typeof request.headers["x-wazo-signature"] === "string" ? request.headers["x-wazo-signature"] : undefined;
+    return handleWazoWebhook(request, reply, {legacyHmac:signature});
+  });
+
+  app.post<{Params:{event:string;token:string}}>("/v1/providers/wazo/webhook/:event/:token", async (request, reply) => {
+    return handleWazoWebhook(request, reply, {callbackEvent:request.params.event, callbackToken:request.params.token});
   });
 
   app.post<{Params:{callId:string}}>("/v1/telephony/calls/:callId/transfer", async (request, reply) => {

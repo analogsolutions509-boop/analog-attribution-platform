@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 type Json = Record<string, unknown>;
 
@@ -23,34 +23,72 @@ function bodyRecord(value: unknown): Json {
     ? value as Json : {};
 }
 
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+function timingSafeSecretEqual(left: string | undefined, right: string): boolean {
+  if (!left || !right) return false;
+  const leftBuffer = Buffer.from(left, "utf8");
+  const rightBuffer = Buffer.from(right, "utf8");
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
 export function verifyWazoWebhook(raw: string, signature: string | undefined, secret: string): boolean {
   if (!signature || !secret) return false;
   const expected = createHmac("sha256", secret).update(raw).digest("hex");
-  const left = Buffer.from(signature.replace(/^sha256=/i, ""), "utf8");
-  const right = Buffer.from(expected, "utf8");
-  return left.length === right.length && timingSafeEqual(left, right);
+  const provided = signature.replace(/^sha256=/i, "");
+  return timingSafeSecretEqual(provided, expected);
 }
 
-export function normalizeWazoEvent(payload: unknown) {
+export function wazoWebhookCallbackToken(secret: string): string {
+  return createHash("sha256").update(secret, "utf8").digest("base64url");
+}
+
+export function verifyWazoWebhookToken(token: string | undefined, secret: string): boolean {
+  return timingSafeSecretEqual(token, wazoWebhookCallbackToken(secret));
+}
+
+export function normalizeWazoEvent(payload: unknown, defaultEvent?: string) {
   const root = bodyRecord(payload);
-  const data = bodyRecord(root.data);
+  const data = bodyRecord(root.data ?? payload);
   const call = bodyRecord(data.call ?? root.call);
-  const event = String(root.event ?? root.event_name ?? data.event ?? "");
+  const source = Object.assign({}, data, call);
+
+  const event = firstString(root.name, root.event, root.event_name, data.event, defaultEvent) ?? "";
+  const providerCallId = firstString(call.id, call.call_id, data.call_id, root.call_id) ?? "";
+  const callerNumber = firstString(
+    call.caller_id_number, call.caller_number, call.from,
+    data.caller_id_number, data.caller_number, data.from
+  );
+  const calledNumber = firstString(
+    call.called_number, call.dialed_extension, call.destination_extension, call.to,
+    data.called_number, data.dialed_extension, data.destination_extension, data.to
+  );
+  const startedAt = firstString(
+    call.started_at, call.start_time, call.creation_time,
+    data.started_at, data.start_time, data.creation_time
+  );
+  const endedAt = firstString(
+    call.ended_at, call.end_time, call.hangup_time,
+    data.ended_at, data.end_time, data.hangup_time
+  );
+  const durationValue = source.duration ?? source.duration_seconds;
+
   return {
     event,
-    providerCallId: String(call.id ?? call.call_id ?? data.call_id ?? root.call_id ?? ""),
-    callerNumber: typeof (call.caller_number ?? call.from) === "string"
-      ? String(call.caller_number ?? call.from) : undefined,
-    calledNumber: typeof (call.called_number ?? call.to) === "string"
-      ? String(call.called_number ?? call.to) : undefined,
-    direction: typeof call.direction === "string" ? call.direction : undefined,
-    startedAt: typeof (call.started_at ?? call.start_time) === "string"
-      ? String(call.started_at ?? call.start_time) : undefined,
-    endedAt: typeof (call.ended_at ?? call.end_time) === "string"
-      ? String(call.ended_at ?? call.end_time) : undefined,
-    durationSeconds: Number.isFinite(Number(call.duration ?? call.duration_seconds))
-      ? Number(call.duration ?? call.duration_seconds) : undefined,
-    recordingUrl: typeof call.recording_url === "string" ? call.recording_url : undefined
+    providerCallId,
+    callerNumber,
+    calledNumber,
+    direction: firstString(call.direction, data.direction),
+    startedAt,
+    endedAt,
+    durationSeconds: Number.isFinite(Number(durationValue)) ? Number(durationValue) : undefined,
+    status: firstString(call.status, data.status),
+    recordingUrl: firstString(call.recording_url, call.recordingUrl, data.recording_url, data.recordingUrl)
   };
 }
 
@@ -94,6 +132,24 @@ export class WazoClient {
 
   async cancelTransfer(id: string) {
     return await this.request(`/api/calld/1.0/transfers/${encodeURIComponent(id)}`, {method:"DELETE"});
+  }
+
+  async listWebhookSubscriptions() {
+    return await this.request("/api/webhookd/1.0/subscriptions", {method:"GET"});
+  }
+
+  async createWebhookSubscription(subscription: Json) {
+    return await this.request("/api/webhookd/1.0/subscriptions", {
+      method:"POST",
+      body:JSON.stringify(subscription)
+    });
+  }
+
+  async updateWebhookSubscription(id: string, subscription: Json) {
+    return await this.request(`/api/webhookd/1.0/subscriptions/${encodeURIComponent(id)}`, {
+      method:"PUT",
+      body:JSON.stringify(subscription)
+    });
   }
 
   async createCall(source: string, destination: string, variables: Record<string,string> = {}) {

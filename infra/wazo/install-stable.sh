@@ -12,7 +12,7 @@ if ! grep -qE '^VERSION_ID="?12"?$' /etc/os-release; then
 fi
 
 apt update
-apt install -yq sudo git ansible curl
+apt install -yq sudo git ansible curl jq openssl
 
 if [[ ! -d /opt/wazo-ansible/.git ]]; then
   git clone https://github.com/wazo-platform/wazo-ansible.git /opt/wazo-ansible
