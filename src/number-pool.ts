@@ -4,6 +4,19 @@ export async function assignTrackingNumber(siteId: string, visitorId: string, se
   const client = await db.connect();
   try {
     await client.query("BEGIN");
+    const existing = await client.query(
+      `SELECT tn.phone_number FROM number_assignments na
+       JOIN tracking_numbers tn ON tn.id=na.tracking_number_id
+       WHERE tn.site_id=$1 AND na.session_id=$2 AND na.expires_at>NOW()
+       ORDER BY na.last_seen_at DESC LIMIT 1`,
+      [siteId,sessionId]
+    );
+    if (existing.rowCount) {
+      const expires = new Date(Date.now()+30*60*1000);
+      await client.query("UPDATE number_assignments SET visitor_id=$2,last_seen_at=NOW(),expires_at=$3 WHERE session_id=$1",[sessionId,visitorId,expires]);
+      await client.query("COMMIT");
+      return { phoneNumber: existing.rows[0].phone_number, expiresAt: expires.toISOString() };
+    }
     await client.query("DELETE FROM number_assignments WHERE expires_at<NOW()");
     const result = await client.query(
       `SELECT tn.id,tn.phone_number FROM tracking_numbers tn
@@ -15,7 +28,7 @@ export async function assignTrackingNumber(siteId: string, visitorId: string, se
     if (!result.rowCount) { await client.query("ROLLBACK"); return null; }
     const expires = new Date(Date.now()+30*60*1000);
     await client.query(
-      "INSERT INTO number_assignments(tracking_number_id,visitor_id,session_id,expires_at) VALUES($1,$2,$3,$4) ON CONFLICT(tracking_number_id) DO UPDATE SET visitor_id=EXCLUDED.visitor_id,session_id=EXCLUDED.session_id,assigned_at=NOW(),last_seen_at=NOW(),expires_at=EXCLUDED.expires_at",
+      "INSERT INTO number_assignments(tracking_number_id,visitor_id,session_id,expires_at) VALUES($1,$2,$3,$4)",
       [result.rows[0].id,visitorId,sessionId,expires]
     );
     await client.query("COMMIT");
