@@ -18,6 +18,7 @@ import { registerOmnichannelRoutes } from "./routes/omnichannel.js";
 import { registerOutcomeRoutes } from "./routes/outcomes.js";
 import { registerReportRoutes } from "./routes/reports.js";
 import { registerLeadSearchRoutes } from "./routes/lead-search.js";
+import { registerDidwwRoutes } from "./routes/didww.js";
 import { registerTwilioRoutes } from "./routes/twilio.js";
 
 export function buildApp() {
@@ -74,6 +75,7 @@ export function buildApp() {
   app.register(registerSupplierRoutes);
   app.register(registerPhonePoolRoutes);
   app.register(registerCollectorRoutes);
+  app.register(registerDidwwRoutes);
   app.register(registerOmnichannelRoutes);
   app.register(registerOutcomeRoutes);
   app.register(registerReportRoutes);
