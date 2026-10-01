@@ -8,6 +8,7 @@ import { transcribeBytes } from "./call-intelligence/transcribe.js";
 import { deliverAnalogOSEvent } from "./analog-os.js";
 import { markAnalogOSEventAttempt, markAnalogOSEventSent, recoverAnalogOSEvents } from "./analog-os-outbox.js";
 import { config } from "./config.js";
+import { deliverNotification } from "./notifications.js";
 
 type JobEnvelope = {
   jobId?: string;
@@ -144,6 +145,12 @@ async function handle(job: JobEnvelope) {
     const result = await db.query("SELECT aggregate_id FROM jobs WHERE id=$1", [job.jobId]);
     if (!result.rowCount) throw new Error("job_not_found");
     await processCall(result.rows[0].aggregate_id);
+    return;
+  }
+  if (job.type === "notification.send" && job.jobId) {
+    const result = await db.query("SELECT aggregate_id FROM jobs WHERE id=$1", [job.jobId]);
+    if (!result.rowCount) throw new Error("job_not_found");
+    await deliverNotification(result.rows[0].aggregate_id);
     return;
   }
   throw new Error("unsupported_job");

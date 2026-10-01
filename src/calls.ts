@@ -4,6 +4,7 @@ import { uploadRecording } from "./storage/r2.js";
 import { analyzeTranscript } from "./call-intelligence/analyze.js";
 import { transcribeFile } from "./call-intelligence/transcribe.js";
 import { queueAnalogOSEvent } from "./analog-os-outbox.js";
+import { queueNotification } from "./notifications.js";
 
 export type IncomingCall = {
   siteId: string;
@@ -232,4 +233,13 @@ export async function completeTranscript(
   await queueAnalogOSEvent("call.intelligence.completed", "call", callId, {
     call_id: callId, transcript_id: transcriptId, intelligence
   });
+  const lead = await db.query("SELECT lead_id FROM calls WHERE id=$1", [callId]);
+  const leadId = lead.rows[0]?.lead_id as string | undefined;
+  if (leadId) {
+    await Promise.all([
+      queueNotification({leadId, callId, recipientType:"internal", channel:"email"}),
+      queueNotification({leadId, callId, recipientType:"supplier", channel:"email"}),
+      queueNotification({leadId, callId, recipientType:"supplier", channel:"sms"})
+    ]);
+  }
 }

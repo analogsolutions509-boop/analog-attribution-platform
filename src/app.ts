@@ -13,6 +13,11 @@ import { registerSupplierRoutes } from "./routes/suppliers.js";
 import { registerPhonePoolRoutes } from "./routes/phone-pool.js";
 import { registerCollectorRoutes } from "./routes/collector.js";
 import { registerDashboardRoutes } from "./routes/dashboard.js";
+import { registerTelephonyRoutes } from "./routes/telephony.js";
+import { registerOmnichannelRoutes } from "./routes/omnichannel.js";
+import { registerOutcomeRoutes } from "./routes/outcomes.js";
+import { registerReportRoutes } from "./routes/reports.js";
+import { registerLeadSearchRoutes } from "./routes/lead-search.js";
 import { registerTwilioRoutes } from "./routes/twilio.js";
 
 export function buildApp() {
@@ -64,10 +69,15 @@ export function buildApp() {
   app.register(registerCallRoutes);
   app.register(registerSecondRingRoutes);
   app.register(registerTwilioRoutes);
+  app.register(registerTelephonyRoutes);
   app.register(registerLeadRoutes);
   app.register(registerSupplierRoutes);
   app.register(registerPhonePoolRoutes);
   app.register(registerCollectorRoutes);
+  app.register(registerOmnichannelRoutes);
+  app.register(registerOutcomeRoutes);
+  app.register(registerReportRoutes);
+  app.register(registerLeadSearchRoutes);
   app.register(registerDashboardRoutes);
   return app;
 }

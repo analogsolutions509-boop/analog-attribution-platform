@@ -8,6 +8,8 @@ const pool = new pg.Pool({ connectionString: config.DATABASE_URL });
 const dir = path.resolve(process.cwd(), "migrations");
 const files = (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort();
 
+await pool.query("SELECT pg_advisory_lock(483920174);");
+
 await pool.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
   filename TEXT PRIMARY KEY,
   applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -31,5 +33,6 @@ for (const filename of files) {
     client.release();
   }
 }
+await pool.query("SELECT pg_advisory_unlock(483920174);");
 await pool.end();
 console.log("migrations complete");

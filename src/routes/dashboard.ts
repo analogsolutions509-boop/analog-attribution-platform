@@ -58,7 +58,7 @@ async function dashboardIdentity(app: FastifyInstance, request: FastifyRequest, 
   return username ? { kind: "legacy", username } : null;
 }
 
-async function requireDashboard(app: FastifyInstance, request: FastifyRequest, reply: FastifyReply): Promise<string | null> {
+export async function requireDashboard(app: FastifyInstance, request: FastifyRequest, reply: FastifyReply): Promise<string | null> {
   const identity = await dashboardIdentity(app, request, reply);
   if (!identity) {
     reply.code(401).send({ error: "dashboard_auth_required" });

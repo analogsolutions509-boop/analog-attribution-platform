@@ -4,6 +4,8 @@ import { config } from "./config.js";
 import { closeDb } from "./db.js";
 import { closeQueue } from "./queue.js";
 
+await import("./migrate.js");
+
 const app = buildApp();
 
 try {
