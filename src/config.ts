@@ -18,7 +18,11 @@ const envSchema = z.object({
   R2_BUCKET: z.string().default("analog-call-recordings"),
   R2_ACCESS_KEY_ID: z.string().optional(),
   R2_SECRET_ACCESS_KEY: z.string().optional(),
-  EVENT_MAX_BODY_BYTES: z.coerce.number().int().min(1024).max(1048576).default(65536)
+  EVENT_MAX_BODY_BYTES: z.coerce.number().int().min(1024).max(1048576).default(65536),
+  CORS_ORIGINS: z.string().default("*"),
+  PUBLIC_API_URL: z.string().url().optional(),
+  ANALOG_OS_WEBHOOK_URL: z.string().url().optional(),
+  ANALOG_OS_WEBHOOK_SECRET: z.string().optional()
 });
 
 export const config = envSchema.parse(process.env);

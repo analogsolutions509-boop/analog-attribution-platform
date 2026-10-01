@@ -1,6 +1,7 @@
 import { db } from "./db.js";
 import { enqueueEvent } from "./queue.js";
 import { eventSchema, type CollectorEvent } from "./event-schema.js";
+import { createLead } from "./leads.js";
 
 export { eventSchema };
 
@@ -25,6 +26,21 @@ export async function ingestEvent(siteId: string, input: CollectorEvent) {
     await client.query("COMMIT");
     const eventId = event.rows[0]?.id ?? null;
     if (eventId) await enqueueEvent(eventId);
+    const payload = input.payload as Record<string, unknown>;
+    const phone = typeof payload.phone === "string" ? payload.phone : typeof payload.customer_phone === "string" ? payload.customer_phone : undefined;
+    const email = typeof payload.email === "string" ? payload.email : typeof payload.customer_email === "string" ? payload.customer_email : undefined;
+    if (eventId && (input.event_name === "lead_submit" || input.event_name === "form_submit") && (phone || email)) {
+      await createLead({
+        siteId, visitorId, sessionId, source: "website_form",
+        customerName: typeof payload.name === "string" ? payload.name : undefined,
+        companyName: typeof payload.company_name === "string" ? payload.company_name : undefined,
+        customerPhone: phone, customerEmail: email,
+        serviceType: typeof payload.service_type === "string" ? payload.service_type : undefined,
+        requirements: typeof payload.requirements === "object" && payload.requirements ? payload.requirements as Record<string, unknown> : {},
+        summary: typeof payload.message === "string" ? payload.message : undefined,
+        sourceDetail: { event_key: input.event_key, page_url: input.page_url, utm_source: input.utm_source, utm_campaign: input.utm_campaign }
+      });
+    }
     return { inserted: Boolean(eventId), eventId, visitorId, sessionId };
   } catch (error) {
     await client.query("ROLLBACK");

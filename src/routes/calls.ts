@@ -4,6 +4,7 @@ import { db } from "../db.js";
 import { createJob } from "../jobs.js";
 import { attachRecording, upsertIncomingCall } from "../calls.js";
 import { createRecordingDownloadUrl } from "../storage/r2.js";
+import { attributeCallToLead } from "../leads.js";
 
 export async function registerCallRoutes(app: FastifyInstance) {
   app.post("/v1/calls/events", async (request, reply) => {
@@ -31,6 +32,13 @@ export async function registerCallRoutes(app: FastifyInstance) {
       recordingUrl: typeof body.recording_url === "string" ? body.recording_url : undefined,
       recordingMimeType: typeof body.recording_mime_type === "string" ? body.recording_mime_type : undefined
     });
+    await attributeCallToLead(
+      callId,
+      site.id,
+      typeof body.caller_number === "string" ? body.caller_number : undefined,
+      typeof body.started_at === "string" ? body.started_at : undefined,
+      typeof body.called_number === "string" ? body.called_number : undefined
+    );
     if (body.recording_url) {
       await createJob("call.process", "call", callId);
     }
