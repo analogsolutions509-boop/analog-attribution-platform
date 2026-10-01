@@ -152,13 +152,28 @@ export class WazoClient {
     });
   }
 
-  async createCall(source: string, destination: string, variables: Record<string,string> = {}) {
+  async createCall(
+    source: {user: string; lineId?: number; fromMobile?: boolean},
+    destination: {extension: string; context: string; priority?: number},
+    variables: Record<string,string> = {}
+  ) {
     return await this.request("/api/calld/1.0/calls", {
       method:"POST",
-      body:JSON.stringify({source_user:source,destination_user:destination,variables})
+      body:JSON.stringify({
+        source: {
+          user: source.user,
+          ...(source.lineId !== undefined ? {line_id: source.lineId} : {}),
+          ...(source.fromMobile !== undefined ? {from_mobile: source.fromMobile} : {})
+        },
+        destination: {
+          extension: destination.extension,
+          context: destination.context,
+          ...(destination.priority !== undefined ? {priority: destination.priority} : {})
+        },
+        variables
+      })
     });
   }
-
   async answerCall(callId: string) {
     return await this.request(`/api/calld/1.0/calls/${encodeURIComponent(callId)}/answer`, {method:"PUT"});
   }

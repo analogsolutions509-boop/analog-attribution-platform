@@ -104,3 +104,22 @@ test("Wazo client creates an HTTP call-event subscription",async()=>{
     assert.deepEqual(body.events,["call_created","call_updated","call_ended"]);
   }finally{globalThis.fetch=oldFetch}
 });
+test("Wazo client originates a call with the documented call payload",async()=>{
+  const oldFetch=globalThis.fetch;
+  let request:Request|null=null;
+  globalThis.fetch=async(input,init)=>{request=new Request(input,init);return new Response(JSON.stringify({call_id:"call-2"}),{status:201,headers:{"content-type":"application/json"}})};
+  try{
+    const client=new WazoClient("https://wazo.example/","token");
+    const result=await client.createCall(
+      {user:"user-1",lineId:54,fromMobile:false},
+      {extension:"01611234567",context:"default",priority:1},
+      {ANALOG_CALL_ID:"analog-call-2"}
+    );
+    assert.equal((result as Record<string,unknown>).call_id,"call-2");
+    assert.equal(request?.url,"https://wazo.example/api/calld/1.0/calls");
+    const body=await request!.json() as Record<string,any>;
+    assert.deepEqual(body.source,{user:"user-1",line_id:54,from_mobile:false});
+    assert.deepEqual(body.destination,{extension:"01611234567",context:"default",priority:1});
+    assert.deepEqual(body.variables,{ANALOG_CALL_ID:"analog-call-2"});
+  }finally{globalThis.fetch=oldFetch}
+});
