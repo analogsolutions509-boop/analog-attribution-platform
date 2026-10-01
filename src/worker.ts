@@ -1,6 +1,9 @@
 import "dotenv/config";
 import { db } from "./db.js";
 import { redis, closeQueue } from "./queue.js";
+import { archiveRecording, completeTranscript } from "./calls.js";
+import { downloadRecording, extensionForMimeType } from "./call-recording.js";
+import { transcribeBytes } from "./call-intelligence/transcribe.js";
 
 type JobEnvelope = {
   jobId?: string;
@@ -46,9 +49,41 @@ async function processEvent(eventId: string) {
   return result.rows[0];
 }
 
+async function processCall(callId: string) {
+  const result = await db.query(
+    "SELECT recording_source_url, recording_mime_type FROM calls WHERE id=$1",
+    [callId]
+  );
+  if (!result.rowCount) throw new Error("call_not_found");
+  const call = result.rows[0];
+  if (!call.recording_source_url) throw new Error("recording_source_url_missing");
+
+  const recording = await downloadRecording(call.recording_source_url);
+  const mimeType = call.recording_mime_type ?? recording.mimeType;
+  const key = await archiveRecording(
+    callId,
+    recording.bytes,
+    mimeType,
+    extensionForMimeType(mimeType)
+  );
+  await db.query(
+    "UPDATE calls SET recording_status='stored', recording_storage_key=$2, recording_mime_type=$3, updated_at=NOW() WHERE id=$1",
+    [callId, key, mimeType]
+  );
+
+  const transcript = await transcribeBytes(recording.bytes, mimeType);
+  await completeTranscript(callId, transcript, process.env.OPENAI_API_KEY ?? "");
+}
+
 async function handle(job: JobEnvelope) {
   if (job.type === "event.process" && job.eventId) {
     await processEvent(job.eventId);
+    return;
+  }
+  if (job.type === "call.process" && job.jobId) {
+    const result = await db.query("SELECT aggregate_id FROM jobs WHERE id=$1", [job.jobId]);
+    if (!result.rowCount) throw new Error("job_not_found");
+    await processCall(result.rows[0].aggregate_id);
     return;
   }
   throw new Error("unsupported_job");

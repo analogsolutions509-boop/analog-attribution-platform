@@ -14,14 +14,16 @@ export type IncomingCall = {
   startedAt?: string;
   endedAt?: string;
   durationSeconds?: number;
+  recordingUrl?: string;
+  recordingMimeType?: string;
 };
 
 export async function upsertIncomingCall(input: IncomingCall): Promise<string> {
   const result = await db.query(
     `INSERT INTO calls(
       site_id, provider, provider_call_id, caller_number, called_number, direction,
-      started_at, ended_at, duration_seconds
-    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      started_at, ended_at, duration_seconds, recording_source_url, recording_mime_type
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
     ON CONFLICT(provider, provider_call_id) DO UPDATE SET
       caller_number=COALESCE(EXCLUDED.caller_number,calls.caller_number),
       called_number=COALESCE(EXCLUDED.called_number,calls.called_number),
@@ -29,6 +31,8 @@ export async function upsertIncomingCall(input: IncomingCall): Promise<string> {
       started_at=COALESCE(EXCLUDED.started_at,calls.started_at),
       ended_at=COALESCE(EXCLUDED.ended_at,calls.ended_at),
       duration_seconds=COALESCE(EXCLUDED.duration_seconds,calls.duration_seconds),
+      recording_source_url=COALESCE(EXCLUDED.recording_source_url,calls.recording_source_url),
+      recording_mime_type=COALESCE(EXCLUDED.recording_mime_type,calls.recording_mime_type),
       updated_at=NOW()
     RETURNING id`,
     [
@@ -40,10 +44,19 @@ export async function upsertIncomingCall(input: IncomingCall): Promise<string> {
       input.direction ?? null,
       input.startedAt ?? null,
       input.endedAt ?? null,
-      input.durationSeconds ?? null
+      input.durationSeconds ?? null,
+      input.recordingUrl ?? null,
+      input.recordingMimeType ?? null
     ]
   );
   return result.rows[0].id as string;
+}
+
+export async function attachRecording(callId: string, recordingUrl: string, mimeType?: string): Promise<void> {
+  await db.query(
+    "UPDATE calls SET recording_source_url=$2, recording_mime_type=COALESCE($3,recording_mime_type), recording_status='ready', updated_at=NOW() WHERE id=$1",
+    [callId, recordingUrl, mimeType ?? null]
+  );
 }
 
 export async function archiveRecording(
@@ -83,7 +96,7 @@ export async function completeTranscript(
   const tx = await db.query(
     `INSERT INTO call_transcripts(
       call_id, provider, model, language, status, full_text, duration_seconds, completed_at
-    ) VALUES($1,'openai',$2,NULL,'complete',$3,$4,NOW())
+    ) VALUES($1,$2,$3,NULL,'complete',$4,$5,NOW())
     ON CONFLICT(call_id) DO UPDATE SET
       model=EXCLUDED.model,
       status='complete',
@@ -91,7 +104,7 @@ export async function completeTranscript(
       duration_seconds=EXCLUDED.duration_seconds,
       completed_at=NOW()
     RETURNING id`,
-    [callId, process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-transcribe", transcript.text, transcript.duration]
+    [callId, transcript.provider, transcript.model, transcript.text, transcript.duration]
   );
   const transcriptId = tx.rows[0].id as string;
   await db.query("DELETE FROM transcript_segments WHERE transcript_id=$1", [transcriptId]);

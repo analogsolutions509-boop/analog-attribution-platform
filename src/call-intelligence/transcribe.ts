@@ -105,11 +105,10 @@ async function transcribeWithOpenAI(
   };
 }
 
-export async function transcribeFile(
-  filePath: string,
+export async function transcribeBytes(
+  bytes: Uint8Array,
   mimeType = "audio/mpeg"
 ): Promise<DiarizedTranscript> {
-  const bytes = await readFile(filePath);
 
   if (config.TRANSCRIPTION_PROVIDER === "deepgram") {
     try {
@@ -121,4 +120,11 @@ export async function transcribeFile(
   }
 
   return transcribeWithOpenAI(bytes, mimeType);
+}
+
+export async function transcribeFile(
+  filePath: string,
+  mimeType = "audio/mpeg"
+): Promise<DiarizedTranscript> {
+  return transcribeBytes(await readFile(filePath), mimeType);
 }

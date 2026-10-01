@@ -9,10 +9,14 @@ export async function createJob(
 ) {
   const dedupeKey = `${jobType}:${aggregateId}`;
   const result = await db.query(
-    "INSERT INTO jobs(job_type, aggregate_type, aggregate_id, dedupe_key, payload) VALUES($1,$2,$3,$4,$5) ON CONFLICT(dedupe_key) DO UPDATE SET updated_at=NOW() RETURNING id",
+    "INSERT INTO jobs(job_type, aggregate_type, aggregate_id, dedupe_key, payload) VALUES($1,$2,$3,$4,$5) ON CONFLICT(dedupe_key) DO UPDATE SET status='queued', last_error=NULL, finished_at=NULL, updated_at=NOW() RETURNING id",
     [jobType, aggregateType, aggregateId, dedupeKey, payload]
   );
   const jobId = result.rows[0].id;
-  await redis.lpush("analog:jobs", jobId);
+  await redis.lpush("analog:jobs", JSON.stringify({
+    jobId,
+    type: jobType,
+    ...(typeof payload.eventId === "string" ? { eventId: payload.eventId } : {})
+  }));
   return jobId;
 }
