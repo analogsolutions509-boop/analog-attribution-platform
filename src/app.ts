@@ -10,6 +10,7 @@ import { registerLeadRoutes } from "./routes/leads.js";
 import { registerSupplierRoutes } from "./routes/suppliers.js";
 import { registerPhonePoolRoutes } from "./routes/phone-pool.js";
 import { registerCollectorRoutes } from "./routes/collector.js";
+import { registerDashboardRoutes } from "./routes/dashboard.js";
 
 export function buildApp() {
   const app = Fastify({
@@ -28,5 +29,6 @@ export function buildApp() {
   app.register(registerSupplierRoutes);
   app.register(registerPhonePoolRoutes);
   app.register(registerCollectorRoutes);
+  app.register(registerDashboardRoutes);
   return app;
 }

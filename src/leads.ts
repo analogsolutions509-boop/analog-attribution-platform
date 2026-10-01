@@ -2,7 +2,7 @@ import { db } from "./db.js";
 import { routeLead } from "./routing.js";
 import { normalizePhone } from "./utils/phone.js";
 import { attributeNumberToCall } from "./number-pool.js";
-import { syncAnalogOS } from "./analog-os.js";
+import { queueAnalogOSEvent } from "./analog-os-outbox.js";
 
 export type LeadInput = {
   siteId: string; visitorId?: string; sessionId?: string; source?: string;
@@ -21,7 +21,19 @@ export async function createLead(input: LeadInput) {
   );
   const leadId = result.rows[0].id as string;
   const supplierId = await routeLead(leadId,input.siteId,input.serviceType);
-  await syncAnalogOS("lead.created",{lead_id:leadId,supplier_id:supplierId,source:input.source??"unknown"}).catch(() => undefined);
+  await queueAnalogOSEvent("lead.created", "lead", leadId, {
+    lead_id: leadId,
+    site_id: input.siteId,
+    supplier_id: supplierId,
+    source: input.source ?? "unknown",
+    customer_name: input.customerName ?? null,
+    company_name: input.companyName ?? null,
+    customer_phone: normalizePhone(input.customerPhone),
+    customer_email: input.customerEmail ?? null,
+    service_type: input.serviceType ?? null,
+    requirements: input.requirements ?? {},
+    summary: input.summary ?? null
+  });
   return leadId;
 }
 
@@ -38,6 +50,9 @@ export async function attributeCallToLead(callId: string, siteId: string, phone?
       source: "phone_call", customerPhone: phone, sourceDetail: { attribution: "dynamic_number", called_number: calledNumber }
     });
     await db.query("UPDATE calls SET lead_id=$2,updated_at=NOW() WHERE id=$1",[callId,leadId]);
+    await queueAnalogOSEvent("call.attributed", "call", callId, {
+      call_id: callId, lead_id: leadId, site_id: siteId, method: "dynamic_number"
+    });
     return leadId;
   }
   const normalized = normalizePhone(phone);
@@ -48,5 +63,8 @@ export async function attributeCallToLead(callId: string, siteId: string, phone?
   );
   if (!result.rowCount) return null;
   await db.query("UPDATE calls SET lead_id=$2,attribution_confidence=0.92,attribution_method='phone_exact',updated_at=NOW() WHERE id=$1",[callId,result.rows[0].id]);
+  await queueAnalogOSEvent("call.attributed", "call", callId, {
+    call_id: callId, lead_id: result.rows[0].id, site_id: siteId, method: "phone_exact"
+  });
   return result.rows[0].id;
 }

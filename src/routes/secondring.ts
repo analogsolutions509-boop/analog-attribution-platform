@@ -67,6 +67,8 @@ export async function registerSecondRingRoutes(app: FastifyInstance) {
 
     const callId = await upsertIncomingCall({
       siteId: site.id,
+      siteName: site.name,
+      hostname: site.hostname,
       provider: "secondring",
       providerCallId: call.providerCallId,
       callerNumber: call.callerNumber,

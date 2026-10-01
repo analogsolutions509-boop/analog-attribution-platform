@@ -1,0 +1,9 @@
+{
+  "name": "Analog Attribution Platform",
+  "short_name": "Analog Attribution",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#070b18",
+  "theme_color": "#0b1022",
+  "icons": []
+}

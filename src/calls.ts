@@ -3,9 +3,12 @@ import { db } from "./db.js";
 import { uploadRecording } from "./storage/r2.js";
 import { analyzeTranscript } from "./call-intelligence/analyze.js";
 import { transcribeFile } from "./call-intelligence/transcribe.js";
+import { queueAnalogOSEvent } from "./analog-os-outbox.js";
 
 export type IncomingCall = {
   siteId: string;
+  siteName?: string;
+  hostname?: string;
   provider: string;
   providerCallId: string;
   callerNumber?: string;
@@ -49,7 +52,23 @@ export async function upsertIncomingCall(input: IncomingCall): Promise<string> {
       input.recordingMimeType ?? null
     ]
   );
-  return result.rows[0].id as string;
+  const callId = result.rows[0].id as string;
+  await queueAnalogOSEvent("call.created", "call", callId, {
+    call_id: callId,
+    site_id: input.siteId,
+    site_name: input.siteName ?? null,
+    hostname: input.hostname ?? null,
+    provider: input.provider,
+    provider_call_id: input.providerCallId,
+    caller_number: input.callerNumber ?? null,
+    called_number: input.calledNumber ?? null,
+    direction: input.direction ?? null,
+    started_at: input.startedAt ?? null,
+    ended_at: input.endedAt ?? null,
+    duration_seconds: input.durationSeconds ?? null,
+    recording_url: input.recordingUrl ?? null
+  });
+  return callId;
 }
 
 export async function attachRecording(callId: string, recordingUrl: string, mimeType?: string): Promise<void> {
@@ -57,6 +76,9 @@ export async function attachRecording(callId: string, recordingUrl: string, mime
     "UPDATE calls SET recording_source_url=$2, recording_mime_type=COALESCE($3,recording_mime_type), recording_status='ready', updated_at=NOW() WHERE id=$1",
     [callId, recordingUrl, mimeType ?? null]
   );
+  await queueAnalogOSEvent("recording.ready", "call", callId, {
+    call_id: callId, recording_url: recordingUrl, recording_mime_type: mimeType ?? null
+  });
 }
 
 export async function archiveRecording(
@@ -85,6 +107,9 @@ export async function archiveRecording(
     "UPDATE calls SET recording_status='stored', recording_storage_key=$2, recording_sha256=$3, updated_at=NOW() WHERE id=$1",
     [callId, key, hash]
   );
+  await queueAnalogOSEvent("recording.archived", "call", callId, {
+    call_id: callId, storage_key: key, mime_type: mimeType, size_bytes: bytes.byteLength, sha256: hash
+  });
   return key;
 }
 
@@ -117,6 +142,11 @@ export async function completeTranscript(
       [transcriptId, i, segment.speaker, segment.start, segment.end, segment.text]
     );
   }
+
+  await queueAnalogOSEvent("transcript.completed", "call", callId, {
+    call_id: callId, transcript_id: transcriptId, provider: transcript.provider,
+    model: transcript.model, duration_seconds: transcript.duration
+  });
 
   if (!apiKey) return;
   const intelligence = await analyzeTranscript(transcript.text, apiKey);
@@ -199,4 +229,7 @@ export async function completeTranscript(
     "UPDATE calls SET transcript_status='complete', transcript_text=$2, transcript_segments=$3, intelligence=$4, updated_at=NOW() WHERE id=$1",
     [callId, transcript.text, transcript.segments, intelligence]
   );
+  await queueAnalogOSEvent("call.intelligence.completed", "call", callId, {
+    call_id: callId, transcript_id: transcriptId, intelligence
+  });
 }

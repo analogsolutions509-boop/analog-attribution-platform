@@ -5,6 +5,8 @@ import { retryDelaySeconds } from "./jobs.js";
 import { archiveRecording, completeTranscript } from "./calls.js";
 import { downloadRecording, extensionForMimeType } from "./call-recording.js";
 import { transcribeBytes } from "./call-intelligence/transcribe.js";
+import { deliverAnalogOSEvent } from "./analog-os.js";
+import { markAnalogOSEventAttempt, markAnalogOSEventSent, recoverAnalogOSEvents } from "./analog-os-outbox.js";
 
 type JobEnvelope = {
   jobId?: string;
@@ -80,6 +82,23 @@ async function processEvent(eventId: string) {
   return result.rows[0];
 }
 
+async function processAnalogOSEvent(outboxId: string) {
+  const result = await db.query(
+    "SELECT id,payload,status FROM analog_os_outbox WHERE id=$1",
+    [outboxId]
+  );
+  if (!result.rowCount) throw new Error("analog_os_event_not_found");
+  const event = result.rows[0];
+  if (event.status === "sent") return;
+  try {
+    await deliverAnalogOSEvent(event.payload);
+    await markAnalogOSEventSent(outboxId);
+  } catch (error) {
+    await markAnalogOSEventAttempt(outboxId, error instanceof Error ? error.message : String(error));
+    throw error;
+  }
+}
+
 async function processCall(callId: string) {
   const result = await db.query(
     "SELECT recording_source_url, recording_mime_type FROM calls WHERE id=$1",
@@ -107,6 +126,12 @@ async function processCall(callId: string) {
 }
 
 async function handle(job: JobEnvelope) {
+  if (job.type === "analog.os.sync" && job.jobId) {
+    const result = await db.query("SELECT aggregate_id FROM jobs WHERE id=$1", [job.jobId]);
+    if (!result.rowCount) throw new Error("job_not_found");
+    await processAnalogOSEvent(result.rows[0].aggregate_id);
+    return;
+  }
   if (job.type === "event.process" && job.eventId) {
     await processEvent(job.eventId);
     return;
@@ -126,6 +151,7 @@ process.on("SIGTERM", () => { stopping = true; });
 
 while (!stopping) {
   await recoverJobs();
+  await recoverAnalogOSEvents().catch(() => undefined);
   const result = await redis.brpop("analog:jobs", 5);
   if (!result) continue;
   const payload = JSON.parse(result[1]) as JobEnvelope;
