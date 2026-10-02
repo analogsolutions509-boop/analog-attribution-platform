@@ -21,3 +21,10 @@ test("dashboard exposes interactive visual controls", async () => {
   assert.ok(html.includes("pointermove"));
   assert.ok(html.includes("requestAnimationFrame"));
 });
+
+test("dashboard dropdowns use the signal-mesh visual treatment", async () => {
+  const html = await readFile(new URL("../public/dashboard.html", import.meta.url), "utf8");
+  assert.ok(html.includes(".signal-select"), "shared dropdown skin should exist");
+  assert.ok(html.includes("conic-gradient"), "dropdowns should have a graphic energy edge");
+  assert.ok(html.includes(".signal-select option"), "native option popup should use the dark signal palette");
+});

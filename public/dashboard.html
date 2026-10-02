@@ -24,6 +24,17 @@ body::before{content:"";position:fixed;inset:0;z-index:-3;pointer-events:none;ba
 .brand{user-select:none;text-shadow:0 0 22px rgba(85,214,255,.18)}
 .main{position:relative;transform-style:preserve-3d;perspective:1600px}
 .top,.card,.nav button,.btn,.field input,.field textarea,.field select{transition:transform .28s cubic-bezier(.2,.8,.2,1),box-shadow .28s ease,border-color .28s ease,background .28s ease}
+.signal-select-shell{position:relative;display:inline-grid;min-width:170px;isolation:isolate;border-radius:10px;padding:1px;background:linear-gradient(135deg,rgba(85,214,255,.22),rgba(152,103,255,.18));box-shadow:0 8px 24px rgba(0,0,0,.16)}
+.signal-select-shell::before{content:"";position:absolute;inset:-1px;border-radius:inherit;padding:1px;pointer-events:none;background:conic-gradient(from 0turn,rgba(85,214,255,.12),transparent 28%,rgba(152,103,255,.8) 52%,transparent 72%,rgba(85,214,255,.7) 92%,rgba(85,214,255,.12));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:.3;z-index:-1}
+.signal-select-shell::after{content:"";position:absolute;right:12px;top:50%;width:7px;height:7px;border-right:1.5px solid #9feaff;border-bottom:1.5px solid #9feaff;transform:translateY(-65%) rotate(45deg);filter:drop-shadow(0 0 7px rgba(85,214,255,.55));pointer-events:none;z-index:2}
+.signal-select{width:100%;min-height:40px;appearance:none;-webkit-appearance:none;border:1px solid rgba(143,161,210,.24)!important;border-radius:9px!important;padding:9px 34px 9px 12px!important;color:#eef4ff!important;background:linear-gradient(135deg,rgba(9,17,39,.98),rgba(22,15,53,.98))!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.04),inset 0 0 22px rgba(85,214,255,.025),0 0 0 1px rgba(7,11,24,.35);cursor:pointer;outline:none}
+.signal-select:hover{border-color:rgba(85,214,255,.52)!important;box-shadow:inset 0 0 24px rgba(85,214,255,.055),0 0 22px rgba(85,214,255,.08);transform:translateY(-1px)}
+.signal-select:focus{border-color:rgba(152,103,255,.68)!important;box-shadow:inset 0 0 24px rgba(152,103,255,.08),0 0 0 3px rgba(152,103,255,.11),0 0 24px rgba(85,214,255,.08)}
+.signal-select option,.signal-select optgroup{background:#0d1530;color:#eef4ff}
+.signal-select option:checked{background:linear-gradient(90deg,#1c3e76,#35215f);color:#fff}
+.signal-select-shell:hover::before{opacity:1;animation:orbitEdge 2.1s linear infinite}
+.field>.signal-select-shell{width:100%}.toolbar>.signal-select-shell{flex:0 1 230px}
+@media(max-width:760px){.signal-select-shell,.toolbar>.signal-select-shell{min-width:0;width:100%;flex:1 1 100%}}
 .card{position:relative;overflow:hidden;transform:translate3d(var(--card-x,0px),var(--card-y,0px),var(--card-z,0px)) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));will-change:transform;box-shadow:0 18px 50px rgba(0,0,0,.28),0 0 0 1px rgba(255,255,255,.02)}
 .card::before{content:"";position:absolute;inset:-2px;border-radius:16px;padding:2px;pointer-events:none;background:conic-gradient(from 0turn,transparent 0deg,transparent 250deg,rgba(85,214,255,0) 268deg,rgba(85,214,255,.95) 286deg,rgba(152,103,255,.9) 308deg,transparent 330deg,transparent 360deg);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:0;transform:rotate(0deg);transition:opacity .2s ease}
 .card:hover::before{opacity:1;animation:orbitEdge 2.25s linear infinite}
@@ -331,6 +342,21 @@ boot();
     });
   }
   new MutationObserver(bindReactive).observe(document.getElementById("app"),{childList:true,subtree:true});setTimeout(bindReactive,100);
+  function skinSelect(select){
+    if(!select||select.dataset.signalStyled)return;
+    const shell=document.createElement("div");
+    shell.className="signal-select-shell";
+    shell.dataset.signalStyled="true";
+    select.dataset.signalStyled="true";
+    select.parentNode.insertBefore(shell,select);
+    shell.appendChild(select);
+    const sync=()=>shell.dataset.value=select.value;
+    select.addEventListener("change",sync);
+    sync();
+  }
+  function skinAllSelects(){document.querySelectorAll("select").forEach(skinSelect);}
+  skinAllSelects();
+  new MutationObserver(skinAllSelects).observe(document.body,{childList:true,subtree:true});
 })();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/dashboard/sw.js").catch(()=>{});
 </script>
