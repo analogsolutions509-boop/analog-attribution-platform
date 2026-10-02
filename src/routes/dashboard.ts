@@ -92,6 +92,20 @@ export function buildDashboardLeadsQuery(where: string, limitPosition: number): 
     `;
 }
 
+export function buildDashboardSitesQuery(): string {
+  return `
+      SELECT s.id,s.name,s.hostname,s.status,s.created_at,
+             (SELECT COUNT(*) FROM tracking_numbers tn WHERE tn.site_id=s.id AND tn.active)::int AS tracking_numbers,
+             (SELECT COUNT(*) FROM calls c WHERE c.site_id=s.id)::int AS total_calls,
+             (SELECT COUNT(*) FROM leads l WHERE l.site_id=s.id)::int AS total_leads,
+             COUNT(DISTINCT ss.supplier_id)::int AS supplier_count
+      FROM sites s
+      LEFT JOIN site_suppliers ss ON ss.site_id=s.id
+      GROUP BY s.id
+      ORDER BY s.name
+    `;
+}
+
 export async function registerDashboardRoutes(app: FastifyInstance) {
   const auth0Enabled = Boolean(
     config.AUTH0_DOMAIN &&
@@ -288,13 +302,7 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
 
   app.get("/v1/dashboard/sites", async (request, reply) => {
     if (!(await requireDashboard(app, request, reply))) return;
-    const result = await db.query(`
-      SELECT s.id,s.name,s.hostname,s.status,s.created_at,
-             (SELECT COUNT(*) FROM tracking_numbers tn WHERE tn.site_id=s.id AND tn.active)::int AS tracking_numbers,
-             (SELECT COUNT(*) FROM calls c WHERE c.site_id=s.id)::int AS total_calls,
-             (SELECT COUNT(*) FROM leads l WHERE l.site_id=s.id)::int AS total_leads
-      FROM sites s ORDER BY s.name
-    `);
+    const result = await db.query(buildDashboardSitesQuery());
     return reply.send({ sites: result.rows });
   });
 
