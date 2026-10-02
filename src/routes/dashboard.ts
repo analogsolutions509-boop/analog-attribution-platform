@@ -149,6 +149,70 @@ export function buildDashboardNumbersQuery(): string {
     `;
 }
 
+export function buildLeadFlowQuery(): string {
+  return `
+    WITH v AS (
+      SELECT site_id, COUNT(*)::int AS visitors
+      FROM visitors
+      WHERE last_seen_at >= NOW() - INTERVAL '7 days'
+      GROUP BY site_id
+    ),
+    se AS (
+      SELECT site_id, COUNT(*)::int AS sessions
+      FROM sessions
+      WHERE last_seen_at >= NOW() - INTERVAL '7 days'
+      GROUP BY site_id
+    ),
+    ev AS (
+      SELECT site_id,
+             COUNT(*) FILTER (WHERE event_name='page_view')::int AS page_views,
+             COUNT(*) FILTER (WHERE event_name='phone_click')::int AS phone_clicks,
+             COUNT(*) FILTER (WHERE event_name IN ('form_submit','lead_submit'))::int AS lead_events
+      FROM events
+      WHERE occurred_at >= NOW() - INTERVAL '7 days'
+      GROUP BY site_id
+    ),
+    na AS (
+      SELECT tn.site_id, COUNT(*)::int AS number_assignments
+      FROM number_assignments a
+      JOIN tracking_numbers tn ON tn.id=a.tracking_number_id
+      WHERE a.assigned_at >= NOW() - INTERVAL '7 days'
+      GROUP BY tn.site_id
+    ),
+    l AS (
+      SELECT site_id, COUNT(*)::int AS leads,
+             COUNT(*) FILTER (WHERE source='analog_os_recovery')::int AS recovered_leads
+      FROM leads
+      WHERE created_at >= NOW() - INTERVAL '7 days'
+      GROUP BY site_id
+    ),
+    c AS (
+      SELECT site_id, COUNT(*)::int AS calls
+      FROM calls
+      WHERE created_at >= NOW() - INTERVAL '7 days'
+      GROUP BY site_id
+    )
+    SELECT s.id,s.name,s.hostname,s.status,
+           COALESCE(v.visitors,0)::int AS visitors,
+           COALESCE(se.sessions,0)::int AS sessions,
+           COALESCE(ev.page_views,0)::int AS page_views,
+           COALESCE(ev.phone_clicks,0)::int AS phone_clicks,
+           COALESCE(na.number_assignments,0)::int AS number_assignments,
+           COALESCE(ev.lead_events,0)::int AS lead_events,
+           COALESCE(l.leads,0)::int AS leads,
+           COALESCE(l.recovered_leads,0)::int AS recovered_leads,
+           COALESCE(c.calls,0)::int AS calls
+    FROM sites s
+    LEFT JOIN v ON v.site_id=s.id
+    LEFT JOIN se ON se.site_id=s.id
+    LEFT JOIN ev ON ev.site_id=s.id
+    LEFT JOIN na ON na.site_id=s.id
+    LEFT JOIN l ON l.site_id=s.id
+    LEFT JOIN c ON c.site_id=s.id
+    ORDER BY s.name
+  `;
+}
+
 export async function registerDashboardRoutes(app: FastifyInstance) {
   const auth0Enabled = Boolean(
     config.AUTH0_DOMAIN &&
@@ -382,6 +446,30 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
     if (!(await requireDashboard(app, request, reply))) return;
     const date = typeof request.query.date === "string" ? request.query.date : "";
     return reply.send(await getAnalogOSReconciliationStatus(date));
+  });
+
+  app.get("/v1/dashboard/lead-flow", async (request, reply) => {
+    if (!(await requireDashboard(app, request, reply))) return;
+    const query = request.query as { siteId?: string };
+    const params: unknown[] = [];
+    let filter = "";
+    if (query.siteId) {
+      params.push(query.siteId);
+      filter = " WHERE s.id=$1";
+    }
+    const sql = buildLeadFlowQuery().replace(
+      "    ORDER BY s.name",
+      filter + "\n    ORDER BY s.name"
+    );
+    const result = await db.query(sql, params);
+    return reply.send({
+      window_days: 7,
+      stages: [
+        "visitors","sessions","page_views","number_assignments",
+        "phone_clicks","lead_events","leads","calls"
+      ],
+      sites: result.rows
+    });
   });
 
   app.get("/v1/dashboard/system", async (request, reply) => {

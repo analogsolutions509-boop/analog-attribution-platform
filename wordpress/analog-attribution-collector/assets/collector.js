@@ -9,6 +9,7 @@
   const visitorKey = 'analog_visitor_id';
   const sessionKey = 'analog_session_id';
   const sessionTtl = 30 * 60 * 1000;
+  const capturedForms = new WeakSet();
 
   function uuidFromStorage(storage, name) {
     const current = storage.getItem(name);
@@ -38,9 +39,7 @@
     const session = { id: crypto.randomUUID(), last: now };
     sessionStorage.setItem(sessionKey, JSON.stringify(session));
     return session.id;
-  }
-
-  function params() {
+  }  function params() {
     const url = new URL(window.location.href);
     return {
       utm_source: url.searchParams.get('utm_source'),
@@ -49,6 +48,73 @@
       utm_term: url.searchParams.get('utm_term'),
       utm_content: url.searchParams.get('utm_content')
     };
+  }
+
+  function normalizeLabel(value) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function fieldMeta(control) {
+    const parts = [
+      control.name,
+      control.id,
+      control.getAttribute && control.getAttribute('aria-label'),
+      control.getAttribute && control.getAttribute('placeholder')
+    ];
+    const label = control.labels && control.labels.length ? control.labels[0].textContent : '';
+    if (label) parts.push(label);
+    return normalizeLabel(parts.filter(Boolean).join(' '));
+  }
+
+  function classifyField(meta) {
+    if (/e-?mail/.test(meta)) return 'customer_email';
+    if (/phone|mobile|telephone|tel/.test(meta)) return 'customer_phone';
+    if (/company|business|firm|organisation|organization/.test(meta)) return 'company_name';
+    if (/service|material|concrete|rebar|reinforcement|type|product|subject/.test(meta)) return 'service_type';
+    if (/message|enquir|question|details|requirement|project|note|comment/.test(meta)) return 'message';
+    if (/name|full name|contact/.test(meta)) return 'customer_name';
+    return null;
+  }
+
+  function controlValue(control) {
+    if (!control || control.disabled || control.type === 'submit' ||
+        control.type === 'button' || control.type === 'reset' ||
+        control.type === 'hidden' || control.type === 'password') return '';
+    return String(control.value || '').trim();
+  }  function extractFormLead(form) {
+    const payload = { requirements: {} };
+    const controls = Array.prototype.slice.call(form.querySelectorAll('input,select,textarea'));
+    controls.forEach(function (control) {
+      const value = controlValue(control);
+      if (!value) return;
+      const meta = fieldMeta(control);
+      const field = classifyField(meta);
+      if (field && !payload[field]) payload[field] = value;
+      else if (meta) payload.requirements[meta.slice(0, 80)] = value;
+    });
+    if (!payload.customer_phone && !payload.customer_email) return null;
+    if (!payload.customer_name) {
+      const first = controls.find(function (control) {
+        return /text/i.test(control.type || 'text') && /name|contact/i.test(fieldMeta(control)) && controlValue(control);
+      });
+      if (first) payload.customer_name = controlValue(first);
+    }
+    return payload;
+  }
+
+  function candidateForm(form) {
+    if (!form || !form.querySelectorAll) return false;
+    const meta = normalizeLabel([
+      form.id, form.name, form.className,
+      form.getAttribute && form.getAttribute('action'),
+      form.getAttribute && form.getAttribute('aria-label')
+    ].filter(Boolean).join(' '));
+    if (/search|login|log in|register|newsletter|subscribe|comment/.test(meta)) return false;
+    return form.querySelectorAll('input,select,textarea').length >= 2;
   }
 
   function send(name, payload) {
@@ -71,9 +137,7 @@
       body: JSON.stringify(body),
       keepalive: true
     }).catch(() => undefined);
-  }
-
-  function applyTrackingNumber(phoneNumber) {
+  }  function applyTrackingNumber(phoneNumber) {
     const links = document.querySelectorAll('a[href^="tel:"]');
     links.forEach(function (link) {
       link.setAttribute('href', 'tel:' + phoneNumber.replace(/\s+/g, ''));
@@ -99,7 +163,20 @@
     if (result && result.phone_number) applyTrackingNumber(result.phone_number);
   }
 
-  window.AnalogAttribution = { track: send };
+  function bindForms(root) {
+    const forms = (root || document).querySelectorAll ? (root || document).querySelectorAll('form') : [];
+    Array.prototype.forEach.call(forms, function (form) {
+      if (!candidateForm(form) || capturedForms.has(form)) return;
+      capturedForms.add(form);
+      form.addEventListener('submit', function () {
+        const lead = extractFormLead(form);
+        if (lead) send('form_submit', lead);
+      }, { passive: true });
+    });
+  }  window.AnalogAttribution = { track: send, captureForm: function (form) {
+    const lead = extractFormLead(form);
+    return lead ? send('lead_submit', lead) : Promise.resolve();
+  }};
 
   document.addEventListener('DOMContentLoaded', function () {
     send('page_view', {
@@ -109,8 +186,10 @@
       assignTrackingNumber().catch(function () {});
     });
 
+    bindForms(document);
+
     document.addEventListener('click', function (event) {
-      const target = event.target.closest('a[href]');
+      const target = event.target.closest && event.target.closest('a[href]');
       if (!target) return;
       const href = target.getAttribute('href') || '';
       if (/^tel:/i.test(href)) {

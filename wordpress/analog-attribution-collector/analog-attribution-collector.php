@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Analog Attribution Collector
  * Description: First-party visitor/session/event collector for the Analog Attribution Platform.
- * Version: 0.1.1
+ * Version: 0.2.0
  * Author: Analog Solutions
  */
 
@@ -70,7 +70,7 @@ final class Analog_Attribution_Collector {
       'analog-attribution-collector',
       plugins_url('assets/collector.js', __FILE__),
       [],
-      '0.1.1',
+      '0.2.0',
       true
     );
     wp_localize_script('analog-attribution-collector', 'AnalogCollectorConfig', [
