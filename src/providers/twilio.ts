@@ -96,9 +96,14 @@ export function buildCustomerConferenceTwiml(conferenceName: string, statusCallb
   dial.conference({
     startConferenceOnEnter: false,
     endConferenceOnExit: false,
+    record: "record-from-start",
+    recordingStatusCallback: statusCallbackUrl,
+    recordingStatusCallbackMethod: "POST",
+    recordingStatusCallbackEvent: ["in-progress", "completed", "absent"],
     statusCallback: statusCallbackUrl,
     statusCallbackMethod: "POST",
     statusCallbackEvent: ["start", "end", "join", "leave"],
+    waitUrl: "",
     beep: "false"
   }, conferenceName);
   return response.toString();

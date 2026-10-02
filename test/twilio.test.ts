@@ -94,6 +94,10 @@ test("builds the free-trial customer conference flow", () => {
   assert.ok(xml.includes("<Conference"));
   assert.ok(xml.includes("analog-abc123"));
   assert.ok(xml.includes('startConferenceOnEnter="false"'));
+  assert.ok(xml.includes('record="record-from-start"'));
+  assert.ok(xml.includes('recordingStatusCallback="https://api.example.com/v1/providers/twilio/conference"'));
+  assert.ok(xml.includes('recordingStatusCallbackEvent="in-progress completed absent"'));
+  assert.ok(xml.includes('waitUrl=""'));
 });
 
 test("builds an operator whisper with 1/2/3 choices", () => {

@@ -50,6 +50,7 @@ const envSchema = z.object({
   TWILIO_AUTH_TOKEN: z.string().min(1).optional(),
   TWILIO_FORWARD_TO: z.string().optional(),
   TWILIO_OPERATOR_NUMBER: z.string().optional(),
+  TWILIO_CALLER_ID: z.string().optional(),
   ANALOG_OS_WEBHOOK_URL: z.string().url().optional(),
   ANALOG_OS_WEBHOOK_SECRET: z.string().optional()
 });
