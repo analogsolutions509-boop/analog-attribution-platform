@@ -3,8 +3,8 @@ import { toNodeHandler } from "@modelcontextprotocol/node";
 import * as z from "zod/v4";
 import { config } from "./config.js";
 import {
-  createWordPressClient,
   getPressPilotConnection,
+  getPressPilotExecutor,
   listPressPilotConnections
 } from "./presspilot.js";
 import { executePressPilotPlan } from "./presspilot-runner.js";
@@ -55,7 +55,7 @@ function serverFactory() {
           config.OPENAI_INTELLIGENCE_MODEL
         );
         const result = await executePressPilotPlan(
-          createWordPressClient(connection),
+          await getPressPilotExecutor(connection_id),
           plan,
           dry_run === true
         );
@@ -136,7 +136,7 @@ async function runConnectionTool(
   if (!connection) return jsonResult({ error: "presspilot_connection_not_found" }, true);
   try {
     const result = await executePressPilotPlan(
-      createWordPressClient(connection),
+      await getPressPilotExecutor(connectionId),
       { operations: [{ op: op as never, args }] }
     );
     return jsonResult(result);

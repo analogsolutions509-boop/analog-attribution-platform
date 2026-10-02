@@ -1,6 +1,31 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 
+const PAIRING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+export function generatePairingCode(): string {
+  const bytes = randomBytes(10);
+  let value = "";
+  for (let i = 0; i < 10; i++) value += PAIRING_ALPHABET[bytes[i] % PAIRING_ALPHABET.length];
+  return value.slice(0, 4) + "-" + value.slice(4);
+}
+
+export function isPairingCodeFormatValid(value: string): boolean {
+  return /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{6}$/.test(value);
+}
+
+export function hashPairingCode(code: string, secret: string): string {
+  return createHash("sha256").update(secret + ":pairing:" + code.trim().toUpperCase(), "utf8").digest("hex");
+}
+
+export function generateAgentToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+export function hashAgentToken(token: string, _secret?: string): string {
+  return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
 export const PRESSPILOT_OPERATIONS = [
   "get_site",
   "list_posts",

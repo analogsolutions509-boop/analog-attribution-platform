@@ -19,7 +19,7 @@ const envSchema = z.object({
   ANALOG_DASHBOARD_ALLOW_ANY_AUTH0_USER: z.enum(["true","false"]).default("false").transform(v => v === "true"),
   OPENAI_API_KEY: z.string().min(1).optional(),
   OPENAI_TRANSCRIPTION_MODEL: z.string().default("gpt-transcribe"),
-  OPENAI_INTELLIGENCE_MODEL: z.string().default("gpt-5.6-luna"),
+  OPENAI_INTELLIGENCE_MODEL: z.string().default("gpt-6-luna"),
   DEEPGRAM_API_KEY: z.string().min(1).optional(),
   DEEPGRAM_MODEL: z.string().default("nova-3"),
   DEEPGRAM_DIARIZE_MODEL: z.string().default("latest"),
