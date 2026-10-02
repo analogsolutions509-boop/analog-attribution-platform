@@ -110,6 +110,9 @@ export function buildDashboardNumbersQuery(): string {
   return `
       SELECT tn.id,tn.phone_number,tn.label,tn.active,tn.created_at,
              s.id AS site_id,s.name AS site_name,s.hostname,
+             tn.destination_supplier_id,
+             dst.name AS destination_supplier_name,
+             COALESCE(NULLIF(dst.contact_phone,''),NULLIF(dst.endpoint_url,''),dst.name) AS destination_number,
              COUNT(DISTINCT na.id)::int AS active_assignments,
              COUNT(DISTINCT ss.supplier_id)::int AS destination_count,
              COALESCE(
@@ -127,13 +130,14 @@ export function buildDashboardNumbersQuery(): string {
              ) AS destinations
       FROM tracking_numbers tn
       JOIN sites s ON s.id=tn.site_id
+      LEFT JOIN suppliers dst ON dst.id=tn.destination_supplier_id
       LEFT JOIN number_assignments na
         ON na.tracking_number_id=tn.id AND na.expires_at>NOW()
       LEFT JOIN site_suppliers ss
         ON ss.site_id=s.id AND ss.active
       LEFT JOIN suppliers sp
         ON sp.id=ss.supplier_id AND sp.status='active'
-      GROUP BY tn.id,s.id
+      GROUP BY tn.id,s.id,dst.id
       ORDER BY s.name,tn.phone_number
     `;
 }
@@ -338,9 +342,16 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
     return reply.send({ sites: result.rows });
   });
 
-  app.get("/v1/dashboard/numbers", async (request, reply) => {
+  app.get<{ Querystring: { siteId?: string } }>("/v1/dashboard/numbers", async (request, reply) => {
     if (!(await requireDashboard(app, request, reply))) return;
-    const result = await db.query(buildDashboardNumbersQuery());
+    const params: unknown[] = [];
+    const filter = request.query.siteId ? " WHERE tn.site_id=$1" : "";
+    if (request.query.siteId) params.push(request.query.siteId);
+    const sql = buildDashboardNumbersQuery().replace(
+      "      ORDER BY s.name,tn.phone_number",
+      filter + "\n      ORDER BY s.name,tn.phone_number"
+    );
+    const result = await db.query(sql, params);
     return reply.send({ numbers: result.rows });
   });
 
