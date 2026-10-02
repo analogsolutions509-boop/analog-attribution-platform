@@ -15,9 +15,9 @@ button,input,select{font:inherit}.shell{display:flex;min-height:100vh}.side{widt
 @media(max-width:760px){.side{display:none}.main{padding:15px}.grid{grid-template-columns:repeat(2,1fr)}.top{align-items:flex-start;flex-direction:column}.actions{width:100%;flex-wrap:wrap}.modal{padding:10px}.metric .value{font-size:22px}}
 /* Analog interactive control-room layer */
 :root{--mx:50vw;--my:50vh;--tiltX:0deg;--tiltY:0deg;--scene-energy:1}
-body{overflow-x:hidden;background:#040611}
-body::before{content:"";position:fixed;inset:-15%;z-index:-3;pointer-events:none;background:radial-gradient(circle at var(--mx) var(--my),rgba(85,214,255,.16),transparent 24%),radial-gradient(circle at 78% 22%,rgba(152,103,255,.2),transparent 28%),radial-gradient(circle at 20% 80%,rgba(62,119,255,.14),transparent 30%);filter:blur(26px);transform:translate3d(0,0,0);transition:opacity .35s}
-.ambient-canvas{position:fixed;inset:0;width:100%;height:100%;z-index:-2;pointer-events:none;opacity:.8;mix-blend-mode:screen}
+body{overflow-x:hidden;background:linear-gradient(135deg,#050817 0%,#08112a 42%,#120a2a 100%)}
+body::before{content:"";position:fixed;inset:0;z-index:-3;pointer-events:none;background:linear-gradient(115deg,rgba(40,112,255,.09),transparent 42%,rgba(132,73,255,.11));opacity:.7}
+.ambient-canvas{position:fixed;inset:0;width:100%;height:100%;z-index:-2;pointer-events:none;opacity:.78}
 .ambient-canvas.off{opacity:0}
 #app{position:relative;z-index:1}
 .side{backdrop-filter:blur(18px);background:rgba(5,9,23,.76);box-shadow:18px 0 60px rgba(0,0,0,.2)}
@@ -25,9 +25,14 @@ body::before{content:"";position:fixed;inset:-15%;z-index:-3;pointer-events:none
 .main{position:relative;transform-style:preserve-3d;perspective:1600px}
 .top,.card,.nav button,.btn,.field input,.field textarea,.field select{transition:transform .28s cubic-bezier(.2,.8,.2,1),box-shadow .28s ease,border-color .28s ease,background .28s ease}
 .card{position:relative;overflow:hidden;transform:translate3d(var(--card-x,0px),var(--card-y,0px),var(--card-z,0px)) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));will-change:transform;box-shadow:0 18px 50px rgba(0,0,0,.28),0 0 0 1px rgba(255,255,255,.02)}
-.card::after{content:"";position:absolute;inset:-1px;pointer-events:none;background:radial-gradient(260px circle at var(--spot-x,50%) var(--spot-y,50%),rgba(85,214,255,.15),transparent 58%);opacity:0;transition:opacity .25s}
-.card:hover::after{opacity:1}
+.card::before{content:"";position:absolute;inset:-2px;border-radius:16px;padding:2px;pointer-events:none;background:conic-gradient(from 0turn,transparent 0deg,transparent 250deg,rgba(85,214,255,0) 268deg,rgba(85,214,255,.95) 286deg,rgba(152,103,255,.9) 308deg,transparent 330deg,transparent 360deg);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:0;transform:rotate(0deg);transition:opacity .2s ease}
+.card:hover::before{opacity:1;animation:orbitEdge 2.25s linear infinite}
+.card:hover{border-color:rgba(85,214,255,.38);box-shadow:0 20px 55px rgba(0,0,0,.32),0 0 24px rgba(85,214,255,.08)}
+.btn::after{content:"";position:absolute;inset:0;border-radius:inherit;padding:1px;pointer-events:none;background:conic-gradient(from 0turn,transparent 0deg,transparent 255deg,rgba(85,214,255,.95) 282deg,rgba(152,103,255,.9) 305deg,transparent 330deg);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:0}
+.btn{position:relative;overflow:hidden}
+.btn:hover::after{opacity:1;animation:orbitEdge 1.8s linear infinite}
 .btn:hover{transform:translateY(-2px) translateZ(12px);box-shadow:0 12px 28px rgba(0,0,0,.24)}
+@keyframes orbitEdge{to{transform:rotate(1turn)}}
 .nav button:hover{transform:translateX(5px)}
 .scene-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
 .power-switch{display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid rgba(143,161,210,.2);border-radius:999px;background:rgba(11,17,39,.72);color:#9ca9ca;cursor:pointer;box-shadow:inset 0 0 18px rgba(69,211,154,.03)}
@@ -255,77 +260,77 @@ $("#numberSite").onchange=()=>loadNumberDestinationOptions($("#numberSite").valu
 $("#numberEditorModal").onclick=e=>{if(e.target.id==="numberEditorModal")closeNumberEditor();};}
 async function boot(){bind();try{const auth=await api("/v1/dashboard/auth/status");state.auth0Enabled=!!auth.auth0Enabled;setupAuthUi();if(auth.authenticated&&auth.accessGranted!==false){state.user=auth.user||null;showApp();await loadAll();return}showLogin();if(auth.authenticated&&auth.accessGranted===false)$("#loginError").textContent=auth.message||("Authenticated as "+(auth.email||"unknown")+", but this account is not authorized for dashboard access.")}catch(err){showLogin();$("#loginError").textContent="Could not reach the dashboard authentication service."}}
 boot();
-/* Interactive control room */
+/* Interactive control room: attribution signal mesh */
 (function(){
-  const root=document.documentElement, canvas=document.getElementById("ambientCanvas");
-  const ctx=canvas?.getContext("2d",{alpha:true});
+  const root=document.documentElement,canvas=document.getElementById("ambientCanvas"),ctx=canvas?.getContext("2d",{alpha:true});
   const reduce=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const switches=[["ambientPower","ambient-canvas"],["depthPower","depth-off"],["glowPower","glow-off"]];
-  function syncSwitch(id){
-    const input=document.getElementById(id); if(!input)return;
-    const label=input.closest(".power-switch"); label?.setAttribute("data-on",String(input.checked));
-  }
+  const switches=["ambientPower","depthPower","glowPower"];
   function powerState(){
     const ambient=document.getElementById("ambientPower")?.checked!==false;
     const depth=document.getElementById("depthPower")?.checked!==false;
     const glow=document.getElementById("glowPower")?.checked!==false;
-    canvas?.classList.toggle("off",!ambient); document.body.classList.toggle("energy-off",!depth);
-    document.body.classList.toggle("glow-off",!glow); root.style.setProperty("--scene-energy",glow?"1":"0.35");
-    switches.forEach(([id])=>syncSwitch(id));
+    canvas?.classList.toggle("off",!ambient);
+    document.body.classList.toggle("energy-off",!depth);
+    document.body.classList.toggle("glow-off",!glow);
+    root.style.setProperty("--scene-energy",glow?"1":"0.35");
+    switches.forEach(id=>{const i=document.getElementById(id),l=i?.closest(".power-switch");if(i&&l)l.dataset.on=String(i.checked)});
   }
-  switches.forEach(([id])=>document.getElementById(id)?.addEventListener("change",powerState));
-  powerState();
+  switches.forEach(id=>document.getElementById(id)?.addEventListener("change",powerState));powerState();
 
-  let w=0,h=0,dpr=1,frame=0; const points=[];
+  let w=0,h=0,dpr=1,frame=0,mouseX=innerWidth/2,mouseY=innerHeight/2;
+  const nodes=[],edges=[];
   function resize(){
     if(!canvas||!ctx)return;
-    const rect=canvas.getBoundingClientRect(); w=rect.width; h=rect.height; dpr=Math.min(window.devicePixelRatio||1,2.5);
-    canvas.width=Math.floor(w*dpr); canvas.height=Math.floor(h*dpr); ctx.setTransform(dpr,0,0,dpr,0,0);
-    points.length=0; const count=Math.min(110,Math.max(40,Math.floor(w*h/18000)));
-    for(let i=0;i<count;i++) points.push({x:Math.random()*w,y:Math.random()*h,vx:(Math.random()-.5)*.16,vy:(Math.random()-.5)*.12,r:Math.random()*1.6+.35,p:Math.random()*6.28});
+    w=innerWidth;h=innerHeight;dpr=Math.min(devicePixelRatio||1,2.5);
+    canvas.width=Math.floor(w*dpr);canvas.height=Math.floor(h*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);
+    nodes.length=0;edges.length=0;
+    const cols=Math.max(7,Math.floor(w/170)),rows=Math.max(5,Math.floor(h/145));
+    for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
+      const jx=(Math.random()-.5)*44,jy=(Math.random()-.5)*34;
+      nodes.push({bx:(x+.5)/cols*w+jx,by:(y+.5)/rows*h+jy,x:0,y:0,vx:0,vy:0,phase:Math.random()*Math.PI*2});
+    }
+    for(let i=0;i<nodes.length;i++){const col=i%cols;if(col<cols-1)edges.push([i,i+1]);if(i+cols<nodes.length)edges.push([i,i+cols]);if(col<cols-1&&i+cols<nodes.length&&i%3===0)edges.push([i,i+cols+1]);}
   }
   function draw(t){
     if(canvas&&ctx){
       ctx.clearRect(0,0,w,h);
-      const active=document.getElementById("ambientPower")?.checked!==false;
-      if(active&&!reduce){
-        const mx=parseFloat(root.style.getPropertyValue("--mouse-x"))||w*.5, my=parseFloat(root.style.getPropertyValue("--mouse-y"))||h*.5;
-        for(const p of points){
-          const dx=mx-p.x,dy=my-p.y,dist=Math.hypot(dx,dy)||1,force=Math.max(0,1-dist/260);
-          p.vx+=dx/dist*force*.008;p.vy+=dy/dist*force*.008;p.x+=p.vx;p.y+=p.vy;p.vx*=.992;p.vy*=.992;
-          if(p.x<0)p.x=w;if(p.x>w)p.x=0;if(p.y<0)p.y=h;if(p.y>h)p.y=0;
-          const pulse=.5+.5*Math.sin(t*.001+p.p), a=.14+.2*pulse;
-          ctx.beginPath();ctx.arc(p.x,p.y,p.r+force*1.5,0,Math.PI*2);ctx.fillStyle="rgba(92,210,255,"+a+")";ctx.fill();
-        }
-        for(let i=0;i<points.length;i++){const a=points[i];for(let j=i+1;j<Math.min(points.length,i+5);j++){const b=points[j],d=Math.hypot(a.x-b.x,a.y-b.y);if(d<120){ctx.strokeStyle="rgba(111,130,255,"+((1-d/120)*.055)+")";ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()}}}
+      if(document.getElementById("ambientPower")?.checked!==false&&!reduce){
+        const time=t*.00022;
+        nodes.forEach((n,i)=>{
+          const dx=mouseX-n.bx,dy=mouseY-n.by,dist=Math.hypot(dx,dy)||1,field=Math.max(0,1-dist/300);
+          const targetX=n.bx-dx/dist*field*34,targetY=n.by-dy/dist*field*34;
+          n.vx+=(targetX-n.x)*.012;n.vy+=(targetY-n.y)*.012;n.vx*=.88;n.vy*=.88;
+          n.x+=n.vx+(Math.sin(time+i*.71)*.09);n.y+=n.vy+(Math.cos(time*.9+i*.53)*.07);
+        });
+        edges.forEach(([ai,bi],idx)=>{
+          const a=nodes[ai],b=nodes[bi],dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1,near=Math.max(0,1-Math.hypot(mouseX-(a.x+b.x)/2,mouseY-(a.y+b.y)/2)/320);
+          const hue=(idx%2===0)?"85,214,255":"152,103,255";
+          ctx.strokeStyle="rgba("+hue+","+(0.08+near*.16)+")";ctx.lineWidth=1+near*.35;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+          const packet=(t*.00008+idx*.073)%1,px=a.x+dx*packet,py=a.y+dy*packet;
+          ctx.fillStyle="rgba("+hue+","+(0.28+near*.42)+")";ctx.fillRect(px-1.2,py-1.2,2.4,2.4);
+        });
+        nodes.forEach((n,i)=>{const near=Math.max(0,1-Math.hypot(mouseX-n.x,mouseY-n.y)/180),pulse=.5+.5*Math.sin(t*.0012+n.phase);ctx.fillStyle=i%2?"rgba(152,103,255,"+(0.23+near*.3)+")":"rgba(85,214,255,"+(0.23+near*.3)+")";ctx.fillRect(n.x-1.5-near,n.y-1.5-near,3+near*2,3+near*2);ctx.strokeStyle=ctx.fillStyle;ctx.lineWidth=.7;ctx.beginPath();ctx.arc(n.x,n.y,5+pulse*2+near*5,0,Math.PI*2);ctx.stroke();});
       }
     }
     frame=requestAnimationFrame(draw);
   }
-  resize(); window.addEventListener("resize",resize,{passive:true}); frame=requestAnimationFrame(draw);
-
-  let px=w*.5,py=h*.5;
-  window.addEventListener("pointermove",(e)=>{
-    px=e.clientX;py=e.clientY;root.style.setProperty("--mx",e.clientX+"px");root.style.setProperty("--my",e.clientY+"px");
-    root.style.setProperty("--mouse-x",e.clientX);root.style.setProperty("--mouse-y",e.clientY);
-  },{passive:true});
+  function updatePointer(x,y){
+    mouseX=x;mouseY=y;root.style.setProperty("--mx",x+"px");root.style.setProperty("--my",y+"px");root.style.setProperty("--mouse-x",x);root.style.setProperty("--mouse-y",y);
+  }
+  updatePointer(mouseX,mouseY);resize();addEventListener("resize",resize,{passive:true});addEventListener("pointermove",e=>updatePointer(e.clientX,e.clientY),{passive:true});frame=requestAnimationFrame(draw);
   function bindReactive(){
     document.querySelectorAll(".card,.btn,.nav button").forEach(el=>{
-      if(el.dataset.reactiveBound)return; el.dataset.reactiveBound="1";
+      if(el.dataset.reactiveBound)return;el.dataset.reactiveBound="1";
       el.addEventListener("pointermove",e=>{
         if(document.body.classList.contains("energy-off"))return;
         const r=el.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;
-        if(el.classList.contains("card")){el.style.setProperty("--rx",(-y*5)+"deg");el.style.setProperty("--ry",(x*7)+"deg");el.style.setProperty("--spot-x",(x*100+50)+"%");el.style.setProperty("--spot-y",(y*100+50)+"%");}
-        else{el.style.transform="translate3d("+(x*4)+"px,"+(y*3)+"px,12px)";}
+        if(el.classList.contains("card")){el.style.setProperty("--rx",(-y*6)+"deg");el.style.setProperty("--ry",(x*9)+"deg");}
+        else el.style.transform="translate3d("+(x*5)+"px,"+(y*4)+"px,14px)";
       });
-      el.addEventListener("pointerleave",()=>{
-        if(el.classList.contains("card")){el.style.setProperty("--rx","0deg");el.style.setProperty("--ry","0deg");}
-        else{el.style.transform="";}
-      });
+      el.addEventListener("pointerleave",()=>{el.style.setProperty("--rx","0deg");el.style.setProperty("--ry","0deg");el.style.transform=""});
     });
   }
-  new MutationObserver(bindReactive).observe(document.getElementById("app"),{childList:true,subtree:true});
-  setTimeout(bindReactive,100);
+  new MutationObserver(bindReactive).observe(document.getElementById("app"),{childList:true,subtree:true});setTimeout(bindReactive,100);
 })();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/dashboard/sw.js").catch(()=>{});
 </script>
