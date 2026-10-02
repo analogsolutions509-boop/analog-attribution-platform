@@ -107,5 +107,12 @@ export async function registerTelephonyRoutes(app: FastifyInstance) {
     return reply.send({ok:true});
   });
 
-  app.get("/v1/telephony/status", async (_request, reply) => reply.send({ok:true,provider:config.TELEPHONY_PROVIDER,wazo_configured:Boolean(getWazoClient())}));
+  app.get("/v1/telephony/status", async (_request, reply) => reply.send({
+    ok:true,
+    provider:config.TELEPHONY_PROVIDER,
+    wazo_configured:Boolean(getWazoClient()),
+    twilio_configured:Boolean(config.TWILIO_ACCOUNT_SID && config.TWILIO_AUTH_TOKEN),
+    twilio_operator_configured:Boolean(config.TWILIO_OPERATOR_NUMBER),
+    twilio_ready:Boolean(config.TWILIO_ACCOUNT_SID && config.TWILIO_AUTH_TOKEN && config.TWILIO_OPERATOR_NUMBER)
+  }));
 }
