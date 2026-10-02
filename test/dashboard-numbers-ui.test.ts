@@ -12,3 +12,12 @@ test("dashboard exposes a Numbers side-panel page", async () => {
   assert.ok(html.includes('src="/numbers.js"'));
   assert.ok(html.includes('api("/v1/dashboard/numbers"+q)'));
 });
+test("dashboard exposes interactive visual controls", async () => {
+  const html = await readFile(new URL("../public/dashboard.html", import.meta.url), "utf8");
+  assert.ok(html.includes('id="ambientCanvas"'));
+  assert.ok(html.includes('id="ambientPower"'));
+  assert.ok(html.includes('id="depthPower"'));
+  assert.ok(html.includes('id="glowPower"'));
+  assert.ok(html.includes("pointermove"));
+  assert.ok(html.includes("requestAnimationFrame"));
+});
