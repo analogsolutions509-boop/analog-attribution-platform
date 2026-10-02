@@ -106,6 +106,38 @@ export function buildDashboardSitesQuery(): string {
     `;
 }
 
+export function buildDashboardNumbersQuery(): string {
+  return `
+      SELECT tn.id,tn.phone_number,tn.label,tn.active,tn.created_at,
+             s.id AS site_id,s.name AS site_name,s.hostname,
+             COUNT(DISTINCT na.id)::int AS active_assignments,
+             COUNT(DISTINCT ss.supplier_id)::int AS destination_count,
+             COALESCE(
+               STRING_AGG(
+                 DISTINCT CONCAT(
+                   'Rank ',ss.rank,': ',
+                   COALESCE(NULLIF(sp.contact_phone,''),NULLIF(sp.endpoint_url,''),sp.name)
+                 ),
+                 ' | ' ORDER BY CONCAT(
+                   'Rank ',ss.rank,': ',
+                   COALESCE(NULLIF(sp.contact_phone,''),NULLIF(sp.endpoint_url,''),sp.name)
+                 )
+               ),
+               ''
+             ) AS destinations
+      FROM tracking_numbers tn
+      JOIN sites s ON s.id=tn.site_id
+      LEFT JOIN number_assignments na
+        ON na.tracking_number_id=tn.id AND na.expires_at>NOW()
+      LEFT JOIN site_suppliers ss
+        ON ss.site_id=s.id AND ss.active
+      LEFT JOIN suppliers sp
+        ON sp.id=ss.supplier_id AND sp.status='active'
+      GROUP BY tn.id,s.id
+      ORDER BY s.name,tn.phone_number
+    `;
+}
+
 export async function registerDashboardRoutes(app: FastifyInstance) {
   const auth0Enabled = Boolean(
     config.AUTH0_DOMAIN &&
@@ -304,6 +336,12 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
     if (!(await requireDashboard(app, request, reply))) return;
     const result = await db.query(buildDashboardSitesQuery());
     return reply.send({ sites: result.rows });
+  });
+
+  app.get("/v1/dashboard/numbers", async (request, reply) => {
+    if (!(await requireDashboard(app, request, reply))) return;
+    const result = await db.query(buildDashboardNumbersQuery());
+    return reply.send({ numbers: result.rows });
   });
 
   app.get("/v1/dashboard/system", async (request, reply) => {
