@@ -18,6 +18,8 @@
     "@aws-sdk/s3-request-presigner": "^3.906.0",
     "@fastify/cors": "^10.0.2",
     "@fastify/formbody": "^9.0.0",
+    "@modelcontextprotocol/node": "^2.1.1",
+    "@modelcontextprotocol/server": "^2.3.0",
     "@types/pdfkit": "^0.17.6",
     "dotenv": "^17.2.2",
     "fastify": "^5.5.0",

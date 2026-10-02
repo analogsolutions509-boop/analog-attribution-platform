@@ -22,6 +22,7 @@ import { registerLeadSearchRoutes } from "./routes/lead-search.js";
 import { registerDidwwRoutes } from "./routes/didww.js";
 import { registerTwilioRoutes } from "./routes/twilio.js";
 import { registerWhatConvertsRoutes } from "./routes/whatconverts.js";
+import { registerPressPilotRoutes } from "./routes/presspilot.js";
 
 export function buildApp() {
   const app = Fastify({
@@ -85,5 +86,6 @@ export function buildApp() {
   app.register(registerReportRoutes);
   app.register(registerLeadSearchRoutes);
   app.register(registerDashboardRoutes);
+  app.register(registerPressPilotRoutes);
   return app;
 }

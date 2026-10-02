@@ -53,7 +53,8 @@ const envSchema = z.object({
   TWILIO_CALLER_ID: z.string().optional(),
   ANALOG_OS_WEBHOOK_URL: z.string().url().optional(),
   ANALOG_OS_PULL_URL: z.string().url().optional(),
-  ANALOG_OS_WEBHOOK_SECRET: z.string().optional()
+  ANALOG_OS_WEBHOOK_SECRET: z.string().optional(),
+  PRESSPILOT_MCP_TOKEN: z.string().min(32).optional()
 });
 
 export const config = envSchema.parse(process.env);

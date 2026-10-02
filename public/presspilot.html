@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PressPilot — WordPress Command Center</title>
+<style>
+:root{--bg:#070a12;--panel:#0d1220;--panel2:#111827;--line:#223047;--text:#edf4ff;--muted:#8b9ab1;--blue:#35a7ff;--green:#42d392;--red:#ff6b7d;--shadow:0 24px 80px rgba(0,0,0,.35)}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 5%,#11203e 0,#070a12 38%),var(--bg);color:var(--text);font:14px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;min-height:100vh}
+button,input,textarea{font:inherit}button{cursor:pointer}.shell{max-width:1440px;margin:auto;padding:24px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}.brand{display:flex;align-items:center;gap:12px}.mark{width:40px;height:40px;border:1px solid #3dafff66;border-radius:14px;background:linear-gradient(145deg,#1b6bff33,#8e5dff22);display:grid;place-items:center;box-shadow:inset 0 1px #ffffff22}.brand h1{font-size:19px;margin:0}.brand span{display:block;color:var(--muted);font-size:12px}
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.pill{padding:7px 10px;border:1px solid var(--line);background:#0b111caa;border-radius:999px;color:var(--muted);font-size:12px}.pill.live{color:var(--green);border-color:#42d39244}.btn{border:1px solid var(--line);background:#121a29;color:var(--text);padding:9px 14px;border-radius:10px}.btn.primary{border-color:#35a7ff55;background:linear-gradient(135deg,#176dff,#2c9aff);font-weight:700}.btn.ghost{background:transparent}
+.grid{display:grid;grid-template-columns:1.35fr .85fr;gap:18px}.panel{background:linear-gradient(180deg,#101726e8,#0b111ce8);border:1px solid #26344b;border-radius:18px;box-shadow:var(--shadow);overflow:hidden}.head{display:flex;justify-content:space-between;align-items:center;padding:15px 17px;border-bottom:1px solid var(--line)}.head h2{margin:0;font-size:13px;letter-spacing:.06em;text-transform:uppercase}.body{padding:17px}
+textarea,input,select{width:100%;background:#08101c;border:1px solid #26344b;color:var(--text);border-radius:12px;padding:12px;outline:none}textarea:focus,input:focus,select:focus{border-color:#35a7ff88;box-shadow:0 0 0 3px #35a7ff12}textarea{min-height:180px;resize:vertical}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.actions{display:flex;gap:10px;justify-content:flex-end;align-items:center;margin-top:12px}.toggle{display:flex;gap:8px;align-items:center;color:var(--muted);margin-right:auto}.toggle input{width:auto}
+.connections{display:flex;flex-direction:column;gap:10px}.conn{border:1px solid var(--line);border-radius:14px;padding:12px;background:#0a101b}.conn.active{border-color:#35a7ff66}.conn .topline{display:flex;justify-content:space-between;gap:8px}.conn strong{font-size:13px}.conn small{display:block;color:var(--muted);margin-top:3px;word-break:break-all}.status{font-size:11px;padding:4px 7px;border-radius:999px;border:1px solid var(--line)}.status.ok{color:var(--green);border-color:#42d39244}.status.bad{color:var(--red);border-color:#ff6b7d44}
+.stack{display:flex;flex-direction:column;gap:18px}.timeline{display:flex;flex-direction:column}.step{display:grid;grid-template-columns:28px 1fr;gap:10px;padding:9px 0}.dot{width:9px;height:9px;border-radius:999px;background:#425069;margin-top:7px;box-shadow:0 0 0 5px #182234}.step.done .dot{background:var(--green)}.step.fail .dot{background:var(--red)}.step b{display:block;font-size:12px}.step span{color:var(--muted);font-size:12px}.code{background:#05080e;border:1px solid #1d2a3c;border-radius:12px;padding:12px;min-height:130px;max-height:300px;overflow:auto;color:#a9c1dd;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap}
+.empty{padding:28px 8px;color:var(--muted);text-align:center}.hint{color:var(--muted);font-size:12px;margin:8px 0 0}.mini{font-size:11px;color:var(--muted)}.danger{color:var(--red)}.ok{color:var(--green)}
+.modal{position:fixed;inset:0;background:#02040ac7;display:none;align-items:center;justify-content:center;padding:20px;z-index:10}.modal.show{display:flex}.dialog{width:min(620px,100%);background:#0c1422;border:1px solid #2b3a52;border-radius:18px;box-shadow:var(--shadow)}.dialog .body{display:grid;gap:11px}
+@media(max-width:980px){.grid{grid-template-columns:1fr}}@media(max-width:640px){.shell{padding:12px}.row{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}.actions{flex-wrap:wrap}.toggle{width:100%}}
+</style>
+</head>
+<body>
+<div class="shell">
+<div class="top">
+  <div class="brand"><div class="mark">✦</div><div><h1>PRESSPILOT</h1><span>WordPress Command Center · AI execution layer</span></div></div>
+  <div class="bar">
+    <span class="pill live" id="apiState">● API CONNECTED</span>
+    <span class="pill">MCP /mcp</span>
+    <a class="btn ghost" href="/dashboard">Analog Dashboard</a>
+  </div>
+</div>
+<div class="grid">
+  <section class="panel">
+    <div class="head"><h2>Prompt Console</h2><span class="mini" id="selectedSite">No site selected</span></div>
+    <div class="body">
+      <select id="connection"></select>
+      <textarea id="prompt" placeholder="Example: Find the Ready Mix page and update its title to “Ready Mix Concrete Manchester”."></textarea>
+      <div class="actions">
+        <label class="toggle"><input type="checkbox" id="dryRun"> Plan only — no writes</label>
+        <button class="btn" id="connectBtn">+ Connect WordPress</button>
+        <button class="btn primary" id="executeBtn">Run PressPilot ↗</button>
+      </div>
+      <p class="hint">PressPilot plans the request, calls only allowlisted WordPress operations, then verifies mutations.</p>
+    </div>
+  </section>
+  <aside class="stack">
+    <section class="panel">
+      <div class="head"><h2>Connections</h2><span class="mini" id="connCount">0</span></div>
+      <div class="body"><div class="connections" id="connections"><div class="empty">Loading connected sites…</div></div></div>
+    </section>
+    <section class="panel">
+      <div class="head"><h2>System</h2><span class="status ok">CONTROLLED</span></div>
+      <div class="body">
+        <div class="mini">Allowed tools</div>
+        <div style="margin-top:6px">Pages · Posts · Search · Plugins · Site Info</div>
+        <div class="mini" style="margin-top:12px">Security model</div>
+        <div>Encrypted credentials · allowlisted operations · post-write verification</div>
+      </div>
+    </section>
+  </aside>
+</div>
+<div class="stack" style="margin-top:18px">
+<section class="panel"><div class="head"><h2>Execution Timeline</h2><span class="mini" id="runState">IDLE</span></div><div class="body"><div class="timeline" id="timeline"><div class="empty">Waiting for a task.</div></div></div></section>
+<section class="panel"><div class="head"><h2>Technical Console</h2><span class="mini" id="runId">—</span></div><div class="body"><div class="code" id="console">PressPilot ready.</div></div></section>
+</div>
+</div>
+
+<div class="modal" id="modal">
+  <div class="dialog">
+    <div class="head"><h2>Connect WordPress</h2><button class="btn ghost" id="closeModal">Close</button></div>
+    <div class="body">
+      <input id="wpUrl" placeholder="https://example.com">
+      <div class="row"><input id="wpUser" placeholder="WordPress username"><input id="wpPass" type="password" placeholder="Application password"></div>
+      <input id="wpSiteId" placeholder="Optional Analog site ID">
+      <div class="mini">Use a WordPress Application Password. PressPilot encrypts it before storage and never sends it to the browser again.</div>
+      <div class="actions"><button class="btn primary" id="saveConn">Verify & Connect</button></div>
+    </div>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+let connections=[];
+function esc(v){return String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));}
+function log(v){$("console").textContent=typeof v==="string"?v:JSON.stringify(v,null,2);}
+function setTimeline(items){$("timeline").innerHTML=items.map((x,i)=>'<div class="step '+(x.status==="completed"||x.status==="dry_run"?"done":x.status==="failed"?"fail":"")+'"><div><div class="dot"></div></div><div><b>'+esc(x.op||("Step "+(i+1)))+'</b><span>'+esc(x.status)+(x.verification?" · verified":"")+'</span></div></div>').join("")||'<div class="empty">No operations yet.</div>';}
+async function api(path,opts){const r=await fetch(path,{credentials:"same-origin",headers:{"Content-Type":"application/json"},...opts});let b={};try{b=await r.json();}catch{}if(!r.ok)throw Object.assign(new Error(b.error||("HTTP "+r.status)),{status:r.status,body:b});return b;}
+async function load(){try{const data=await api("/v1/presspilot/connections");connections=data.connections||[];$("connCount").textContent=connections.length;render();$("apiState").textContent="● API CONNECTED";}catch(e){$("apiState").textContent=e.status===401?"● SIGN IN REQUIRED":"● API ERROR";$("apiState").className="pill "+(e.status===401?"":"status bad");$("connections").innerHTML='<div class="empty">'+esc(e.message)+'</div>';}}
+function render(){const select=$("connection");select.innerHTML=connections.length?connections.map(c=>'<option value="'+c.id+'">'+esc(c.base_url)+'</option>').join(""):'<option value="">Connect a WordPress site</option>';if(connections.length){$("selectedSite").textContent=connections[0].base_url;}$("connections").innerHTML=connections.length?connections.map((c,i)=>'<div class="conn '+(i===0?"active":"")+'" data-id="'+c.id+'"><div class="topline"><strong>'+esc(c.base_url)+'</strong><span class="status '+(c.status==="verified"?"ok":"bad")+'">'+esc(c.status)+'</span></div><small>'+esc(c.wp_username)+' · '+(esc(c.capabilities&&Object.keys(c.capabilities).filter(k=>c.capabilities[k]===true).join(", ")||"REST"))+'</small><div style="margin-top:8px"><button class="btn" data-verify="'+c.id+'">Verify</button></div></div>').join(""):'<div class="empty">No sites connected yet.</div>';}
+$("connection").addEventListener("change",e=>{const c=connections.find(x=>x.id===e.target.value);$("selectedSite").textContent=c?c.base_url:"No site selected";});
+$("connectBtn").onclick=()=>$("modal").classList.add("show");$("closeModal").onclick=()=>$("modal").classList.remove("show");
+$("saveConn").onclick=async()=>{try{$("saveConn").disabled=true;const b=await api("/v1/presspilot/connections",{method:"POST",body:JSON.stringify({base_url:$("wpUrl").value,wp_username:$("wpUser").value,app_password:$("wpPass").value,site_id:$("wpSiteId").value||null})});$("modal").classList.remove("show");$("wpPass").value="";await load();$("connection").value=b.connection.id;$("selectedSite").textContent=b.connection.base_url;}catch(e){alert(e.message);}finally{$("saveConn").disabled=false;}};
+$("executeBtn").onclick=async()=>{const id=$("connection").value;if(!id){alert("Connect a WordPress site first.");return;}const prompt=$("prompt").value.trim();if(!prompt){alert("Enter a WordPress task.");return;}try{$("executeBtn").disabled=true;$("runState").textContent="PLANNING";setTimeline([{op:"AI planner",status:"running"}]);const b=await api("/v1/presspilot/execute",{method:"POST",body:JSON.stringify({connection_id:id,prompt,dry_run:$("dryRun").checked})});$("runState").textContent=b.result.status.toUpperCase();$("runId").textContent=b.run_id;setTimeline(b.result.operations);log(b);}catch(e){$("runState").textContent="FAILED";log(e.body||e.message);setTimeline([{op:"PressPilot",status:"failed"}]);}finally{$("executeBtn").disabled=false;}};
+document.addEventListener("click",async e=>{const id=e.target.getAttribute("data-verify");if(!id)return;try{await api("/v1/presspilot/connections/"+id+"/verify",{method:"POST",body:"{}"});await load();}catch(err){alert(err.message);}});
+load();
+</script>
+</body>
+</html>
