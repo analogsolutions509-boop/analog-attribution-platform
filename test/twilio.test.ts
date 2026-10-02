@@ -5,7 +5,10 @@ import {
   normalizeTwilioCall,
   validateTwilioRequest,
   buildIncomingCallTwiml,
-  isTerminalTwilioStatus
+  isTerminalTwilioStatus,
+  buildCustomerConferenceTwiml,
+  buildOperatorWhisperTwiml,
+  buildSupplierBridgeTwiml
 } from "../src/providers/twilio.ts";
 
 test("normalizes an incoming Twilio voice webhook", () => {
@@ -84,4 +87,25 @@ test("recognizes terminal Twilio call states", () => {
   assert.equal(isTerminalTwilioStatus("no-answer"), true);
   assert.equal(isTerminalTwilioStatus("ringing"), false);
   assert.equal(isTerminalTwilioStatus("in-progress"), false);
+});
+
+test("builds the free-trial customer conference flow", () => {
+  const xml = buildCustomerConferenceTwiml("analog-abc123", "https://api.example.com/v1/providers/twilio/conference");
+  assert.ok(xml.includes("<Conference"));
+  assert.ok(xml.includes("analog-abc123"));
+  assert.ok(xml.includes('startConferenceOnEnter="false"'));
+});
+
+test("builds an operator whisper with 1/2/3 choices", () => {
+  const xml = buildOperatorWhisperTwiml("analog-abc123", "https://api.example.com/v1/providers/twilio/operator/action", "Birmingham Ready Mix", "+447000111222");
+  assert.ok(xml.includes("Press 1 to connect the supplier"));
+  assert.ok(xml.includes("Press 2 to keep the call with Analog"));
+  assert.ok(xml.includes("Press 3 to end the call"));
+  assert.ok(xml.includes("numDigits=\"1\""));
+});
+
+test("builds the supplier conference leg", () => {
+  const xml = buildSupplierBridgeTwiml("analog-abc123", "Chorley's Concrete");
+  assert.ok(xml.includes("Chorley's Concrete"));
+  assert.ok(xml.includes("analog-abc123"));
 });

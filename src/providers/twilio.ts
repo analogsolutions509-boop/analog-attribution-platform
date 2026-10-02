@@ -85,3 +85,55 @@ export function isTerminalTwilioStatus(status?: string): boolean {
 export function stableCallFingerprint(callSid: string): string {
   return createHash("sha256").update(callSid).digest("hex");
 }
+
+export function conferenceNameForCall(callSid: string): string {
+  return `analog-${stableCallFingerprint(callSid).slice(0, 24)}`;
+}
+
+export function buildCustomerConferenceTwiml(conferenceName: string, statusCallbackUrl: string): string {
+  const response = new twilio.twiml.VoiceResponse();
+  const dial = response.dial();
+  dial.conference({
+    startConferenceOnEnter: false,
+    endConferenceOnExit: false,
+    statusCallback: statusCallbackUrl,
+    statusCallbackMethod: "POST",
+    statusCallbackEvent: ["start", "end", "join", "leave"],
+    beep: "false"
+  }, conferenceName);
+  return response.toString();
+}
+
+export function buildOperatorWhisperTwiml(
+  conferenceName: string,
+  actionUrl: string,
+  websiteName: string,
+  callerNumber?: string
+): string {
+  const response = new twilio.twiml.VoiceResponse();
+  const gather = response.gather({
+    numDigits: 1,
+    timeout: 8,
+    action: actionUrl,
+    method: "POST"
+  });
+  gather.say(`Analog call from ${websiteName}. Caller ${callerNumber ?? "unknown"}. Press 1 to connect the supplier, 2 to keep the call with Analog, or 3 to end the call.`);
+  response.say("No selection received. The call will remain with Analog.");
+  response.redirect(actionUrl);
+  return response.toString();
+}
+
+export function buildOperatorJoinConferenceTwiml(conferenceName: string): string {
+  const response = new twilio.twiml.VoiceResponse();
+  const dial = response.dial();
+  dial.conference({ endConferenceOnExit: false }, conferenceName);
+  return response.toString();
+}
+
+export function buildSupplierBridgeTwiml(conferenceName: string, supplierName: string): string {
+  const response = new twilio.twiml.VoiceResponse();
+  response.say(`Connecting you to ${supplierName}.`);
+  const dial = response.dial();
+  dial.conference({ endConferenceOnExit: false }, conferenceName);
+  return response.toString();
+}
