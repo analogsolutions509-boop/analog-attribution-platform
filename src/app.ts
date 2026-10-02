@@ -10,6 +10,7 @@ import { registerCallRoutes } from "./routes/calls.js";
 import { registerSecondRingRoutes } from "./routes/secondring.js";
 import { registerLeadRoutes } from "./routes/leads.js";
 import { registerSupplierRoutes } from "./routes/suppliers.js";
+import { registerSupplierAdminRoutes } from "./routes/supplier-admin.js";
 import { registerPhonePoolRoutes } from "./routes/phone-pool.js";
 import { registerCollectorRoutes } from "./routes/collector.js";
 import { registerDashboardRoutes } from "./routes/dashboard.js";
@@ -73,6 +74,7 @@ export function buildApp() {
   app.register(registerTelephonyRoutes);
   app.register(registerLeadRoutes);
   app.register(registerSupplierRoutes);
+  app.register(registerSupplierAdminRoutes);
   app.register(registerPhonePoolRoutes);
   app.register(registerCollectorRoutes);
   app.register(registerDidwwRoutes);

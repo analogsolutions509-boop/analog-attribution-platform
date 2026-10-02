@@ -99,5 +99,6 @@ async function boot(){bind();try{const auth=await api("/v1/dashboard/auth/status
 boot();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/dashboard/sw.js").catch(()=>{});
 </script>
+<script src="/suppliers.js"></script>
 </body>
 </html>
