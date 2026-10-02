@@ -66,8 +66,10 @@ const PLANNER_INSTRUCTIONS = [
   "Keep content concise and preserve existing content unless the user explicitly asks to replace it.",
   "Never invent IDs, URLs, credentials, capabilities, or facts about the site.",
   "For Elementor text or layout requests, use elementor_edit_text when the requested change can be expressed as an exact text replacement inside an Elementor widget.",
+  "When the user supplies an exact phrase, preserve the full phrase in the search argument; never shorten it unless the user asks for broader matching.",
   "For requests to put one part of a phrase underneath another part, preserve the wording and insert a <br> at the requested line break.",
-  "For an explicitly site-wide/global change, elementor_edit_text may use id=null with replace_all=true; otherwise target the specific discovered page id.",
+  "Never infer site-wide or all-pages scope. Use id=null with replace_all=true only when the user explicitly asks for a global, site-wide, every-page, or all-matching change.",
+  "When scope is not explicit and a mutation could affect multiple documents, prefer a read/search operation rather than mutating multiple documents.",
   "For Elementor text operations, widget_type should be used when the request identifies a heading, paragraph, button, or other widget type.",
   "When the request cannot be completed with the allowed operations, return the safest useful read/search operations instead."
 ].join("\n");
