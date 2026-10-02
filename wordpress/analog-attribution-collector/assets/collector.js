@@ -164,7 +164,10 @@
   }
 
   function bindForms(root) {
-    const forms = (root || document).querySelectorAll ? (root || document).querySelectorAll('form') : [];
+    const scope = root || document;
+    const forms = [];
+    if (scope.matches && scope.matches('form')) forms.push(scope);
+    if (scope.querySelectorAll) Array.prototype.push.apply(forms, scope.querySelectorAll('form'));
     Array.prototype.forEach.call(forms, function (form) {
       if (!candidateForm(form) || capturedForms.has(form)) return;
       capturedForms.add(form);
@@ -187,6 +190,15 @@
     });
 
     bindForms(document);
+
+    const formObserver = new MutationObserver(function (mutations) {
+      mutations.forEach(function (mutation) {
+        Array.prototype.forEach.call(mutation.addedNodes || [], function (node) {
+          if (node && node.nodeType === 1) bindForms(node);
+        });
+      });
+    });
+    formObserver.observe(document.body, { childList: true, subtree: true });
 
     document.addEventListener('click', function (event) {
       const target = event.target.closest && event.target.closest('a[href]');

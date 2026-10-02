@@ -11,6 +11,7 @@ test("collector automatically observes contact forms", async () => {
   assert.match(source, /customer_email/);
   assert.match(source, /querySelectorAll\('form'\)/);
   assert.match(source, /addEventListener\('submit'/);
+  assert.match(source, /MutationObserver/);
 });
 
 test("collector preserves explicit lead capture for custom calculators", async () => {
