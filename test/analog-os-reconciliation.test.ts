@@ -9,7 +9,8 @@ import {
   normalizePhoneDigits,
   shouldQueueDailyReconciliation,
   signAnalogOSRequest,
-  validateReconciliationDate
+  validateReconciliationDate,
+  verifyAnalogOSExport
 } from "../src/analog-os-reconciliation.ts";
 
 test("validates only real ISO calendar dates", () => {
@@ -64,4 +65,41 @@ test("creates deterministic request signatures", () => {
   const second = signAnalogOSRequest(body, "test-secret");
   assert.equal(first, second);
   assert.equal(first.length, 64);
+});
+
+test("verifies the OS signature before transport normalization changes lead fields", () => {
+  const payload = {
+    ok: true,
+    date: "2026-10-02",
+    generated_at: "2026-10-02T09:00:00.000Z",
+    leads: [{
+      source: "EMAIL",
+      source_record: "EMAIL:42",
+      os_lead_id: "42",
+      occurred_at: "2026-10-02T08:00:00.000Z",
+      website: "https://www.Example.com/",
+      service: "Ready Mix",
+      location: "Manchester",
+      customer_name: "Buyer",
+      customer_email: " BUYER@EXAMPLE.COM ",
+      customer_phone: "+44 7000 111222",
+      subject: "Concrete",
+      enquiry: "Need C30",
+      classification: "LEAD",
+      confidence: "HIGH",
+      assigned_client: "Client",
+      forwarded: "YES",
+      quote_value: "£500",
+      sale_value: "",
+      commission_rate: "7%",
+      status: "new",
+      original_message_id: "msg-42",
+      notes: "",
+      metadata: {}
+    }],
+    counts: { total: 1, whatconverts: 0, email: 1 }
+  };
+  const signature = signAnalogOSRequest(JSON.stringify(payload), "test-secret");
+  assert.equal(verifyAnalogOSExport(payload, signature, "test-secret"), true);
+  assert.equal(normalizeOSLead(payload.leads[0]).customer_email, "buyer@example.com");
 });

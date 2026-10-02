@@ -160,20 +160,24 @@ async function fetchOSLeads(date: string): Promise<AnalogOSLeadExport> {
   });
   if (!response.ok) throw new Error("analog_os_pull_failed:" + response.status);
   const raw = await response.json() as Partial<AnalogOSLeadExport>;
-  const payload = {
+  const signedPayload = {
     ok: Boolean(raw.ok),
     date: validateReconciliationDate(String(raw.date || "")),
     generated_at: String(raw.generated_at || ""),
-    leads: Array.isArray(raw.leads)
-      ? raw.leads.map((lead) => normalizeOSLead(lead as Record<string, unknown>)) : [],
+    leads: Array.isArray(raw.leads) ? raw.leads : [],
     counts: raw.counts || { total: 0, whatconverts: 0, email: 0 }
   };
-  if (!payload.ok || payload.date !== date || !payload.generated_at) {
+  if (!signedPayload.ok || signedPayload.date !== date || !signedPayload.generated_at) {
     throw new Error("analog_os_pull_invalid_response");
   }
-  if (!verifyAnalogOSExport(payload, String(raw.signature || ""), secret)) {
+  if (!verifyAnalogOSExport(signedPayload as Omit<AnalogOSLeadExport, "signature">, String(raw.signature || ""), secret)) {
     throw new Error("analog_os_pull_invalid_signature");
   }
+
+  const payload = {
+    ...signedPayload,
+    leads: signedPayload.leads.map((lead) => normalizeOSLead(lead as Record<string, unknown>))
+  };
   return { ...payload, signature: String(raw.signature) };
 }
 
