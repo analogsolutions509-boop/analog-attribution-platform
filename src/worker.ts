@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { db } from "./db.js";
 import { redis, closeQueue } from "./queue.js";
-import { retryDelaySeconds } from "./jobs.js";
+import { createJob, retryDelaySeconds } from "./jobs.js";
 import { archiveRecording, completeTranscript } from "./calls.js";
 import { downloadRecording, extensionForMimeType } from "./call-recording.js";
 import { transcribeBytes } from "./call-intelligence/transcribe.js";
@@ -9,6 +9,10 @@ import { deliverAnalogOSEvent } from "./analog-os.js";
 import { markAnalogOSEventAttempt, markAnalogOSEventSent, recoverAnalogOSEvents } from "./analog-os-outbox.js";
 import { config } from "./config.js";
 import { deliverNotification } from "./notifications.js";
+import {
+  ensureDailyAnalogOSReconciliationJob,
+  reconcileAnalogOSDate
+} from "./analog-os-reconciliation.js";
 
 type JobEnvelope = {
   jobId?: string;
@@ -131,6 +135,12 @@ async function processCall(callId: string) {
 }
 
 async function handle(job: JobEnvelope) {
+  if (job.type === "analog.os.reconcile" && job.jobId) {
+    const result = await db.query("SELECT aggregate_id FROM jobs WHERE id=$1", [job.jobId]);
+    if (!result.rowCount) throw new Error("job_not_found");
+    await reconcileAnalogOSDate(result.rows[0].aggregate_id);
+    return;
+  }
   if (job.type === "analog.os.sync" && job.jobId) {
     const result = await db.query("SELECT aggregate_id FROM jobs WHERE id=$1", [job.jobId]);
     if (!result.rowCount) throw new Error("job_not_found");
@@ -157,12 +167,17 @@ async function handle(job: JobEnvelope) {
 }
 
 let stopping = false;
+let lastDailyReconciliationCheckAt = 0;
 process.on("SIGINT", () => { stopping = true; });
 process.on("SIGTERM", () => { stopping = true; });
 
 while (!stopping) {
   await recoverJobs();
   await recoverAnalogOSEvents().catch(() => undefined);
+  if (Date.now() - lastDailyReconciliationCheckAt >= 60_000) {
+    lastDailyReconciliationCheckAt = Date.now();
+    await ensureDailyAnalogOSReconciliationJob(createJob).catch(() => undefined);
+  }
   const result = await redis.brpop("analog:jobs", 5);
   if (!result) continue;
   const payload = JSON.parse(result[1]) as JobEnvelope;

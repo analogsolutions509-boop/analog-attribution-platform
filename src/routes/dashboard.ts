@@ -6,6 +6,8 @@ import { db } from "../db.js";
 import { verifyDashboardCredentials, createDashboardSession, verifyDashboardSession } from "../dashboard-auth.js";
 import { getDashboardAccessMessage, isAllowedDashboardEmail } from "../dashboard-access.js";
 import { createRecordingDownloadUrl } from "../storage/r2.js";
+import { createJob } from "../jobs.js";
+import { getAnalogOSReconciliationStatus, validateReconciliationDate } from "../analog-os-reconciliation.js";
 
 const COOKIE_NAME = "analog_dashboard_session";
 const UI_ROOT = join(process.cwd(), "public");
@@ -358,6 +360,28 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
     );
     const result = await db.query(sql, params);
     return reply.send({ numbers: result.rows });
+  });
+
+  app.post("/v1/dashboard/analog-os/reconcile", async (request, reply) => {
+    if (!(await requireDashboard(app, request, reply))) return;
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const date = validateReconciliationDate(
+      typeof body.date === "string" ? body.date : ""
+    );
+    const jobId = await createJob(
+      "analog.os.reconcile",
+      "date",
+      date,
+      {},
+      { forceRequeue: true }
+    );
+    return reply.code(202).send({ ok: true, queued: true, date, job_id: jobId });
+  });
+
+  app.get<{ Querystring: { date?: string } }>("/v1/dashboard/analog-os/reconciliation", async (request, reply) => {
+    if (!(await requireDashboard(app, request, reply))) return;
+    const date = typeof request.query.date === "string" ? request.query.date : "";
+    return reply.send(await getAnalogOSReconciliationStatus(date));
   });
 
   app.get("/v1/dashboard/system", async (request, reply) => {

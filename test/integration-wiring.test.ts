@@ -15,3 +15,15 @@ test("Twilio and Wazo status paths publish OS call updates", async () => {
   assert.ok(twilio.includes('queueAnalogOSEvent("recording.ready"'));
   assert.ok(telephony.includes("publishCallUpdated"));
 });
+
+test("daily Analog OS reconciliation is wired into the worker and dashboard", async () => {
+  const worker = await readFile(new URL("../src/worker.ts", import.meta.url), "utf8");
+  const dashboard = await readFile(new URL("../src/routes/dashboard.ts", import.meta.url), "utf8");
+  const migration = await readFile(new URL("../migrations/016_analog_os_reconciliation.sql", import.meta.url), "utf8");
+  assert.ok(worker.includes('job.type === "analog.os.reconcile"'));
+  assert.ok(worker.includes("ensureDailyAnalogOSReconciliationJob"));
+  assert.ok(dashboard.includes("/v1/dashboard/analog-os/reconcile"));
+  assert.ok(dashboard.includes("/v1/dashboard/analog-os/reconciliation"));
+  assert.ok(migration.includes("analog_os_reconciliation_runs"));
+  assert.ok(migration.includes("analog_os_recovery_records"));
+});
