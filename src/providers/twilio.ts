@@ -117,7 +117,7 @@ export function buildOperatorWhisperTwiml(
     action: actionUrl,
     method: "POST"
   });
-  gather.say(`Analog call from ${websiteName}. Caller ${callerNumber ?? "unknown"}. Press 1 to connect the supplier, 2 to keep the call with Analog, or 3 to end the call.`);
+  gather.say(`Analog call from ${websiteName}. Caller ${callerNumber ?? "unknown"}. Press 1 to connect the supplier. Press 2 to keep the call with Analog. Press 3 to end the call.`);
   response.say("No selection received. The call will remain with Analog.");
   response.redirect(actionUrl);
   return response.toString();
