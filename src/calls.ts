@@ -112,6 +112,43 @@ export async function upsertIncomingCall(input: IncomingCall): Promise<string> {
   return callId;
 }
 
+export async function publishCallUpdated(callId: string): Promise<void> {
+  const result = await db.query(
+    `SELECT c.id,c.site_id,s.name AS site_name,s.hostname,
+            c.provider,c.provider_call_id,c.caller_number,c.called_number,
+            c.tracking_number,c.forwarding_number,c.destination_number,
+            c.direction,c.started_at,c.ended_at,c.duration_seconds,c.status,
+            c.recording_status,c.recording_source_url
+     FROM calls c
+     JOIN sites s ON s.id=c.site_id
+     WHERE c.id=$1
+     LIMIT 1`,
+    [callId]
+  );
+  if (!result.rowCount) return;
+  const row = result.rows[0];
+  await queueAnalogOSEvent("call.updated", "call", callId, {
+    call_id: row.id,
+    site_id: row.site_id,
+    site_name: row.site_name,
+    hostname: row.hostname,
+    provider: row.provider,
+    provider_call_id: row.provider_call_id,
+    caller_number: row.caller_number,
+    called_number: row.called_number,
+    tracking_number: row.tracking_number,
+    forwarding_number: row.forwarding_number,
+    destination_number: row.destination_number,
+    direction: row.direction,
+    started_at: row.started_at,
+    ended_at: row.ended_at,
+    duration_seconds: row.duration_seconds,
+    status: row.status,
+    recording_status: row.recording_status,
+    recording_url: row.recording_source_url
+  });
+}
+
 export async function attachRecording(callId: string, recordingUrl: string, mimeType?: string): Promise<void> {
   await db.query(
     "UPDATE calls SET recording_source_url=$2, recording_mime_type=COALESCE($3,recording_mime_type), recording_status='ready', updated_at=NOW() WHERE id=$1",

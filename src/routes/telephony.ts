@@ -6,7 +6,7 @@ import { normalizeWazoEvent, verifyWazoWebhook, verifyWazoWebhookToken } from ".
 import { queueAnalogOSEvent } from "../analog-os-outbox.js";
 import { createJob } from "../jobs.js";
 import { attributeCallToLead } from "../leads.js";
-import { resolveCallNumberRoute, upsertIncomingCall } from "../calls.js";
+import { publishCallUpdated, resolveCallNumberRoute, upsertIncomingCall } from "../calls.js";
 import { requireDashboard } from "./dashboard.js";
 
 const WAZO_CALL_EVENTS = new Set(["call_created", "call_updated", "call_ended"]);
@@ -43,6 +43,7 @@ export async function registerTelephonyRoutes(app: FastifyInstance) {
         const route = await resolveCallNumberRoute(existing.rows[0].site_id, event.calledNumber);
         await db.query("UPDATE calls SET tracking_number_id=COALESCE($2,tracking_number_id),forwarding_number_id=COALESCE($3,forwarding_number_id),tracking_number=COALESCE($4,tracking_number),forwarding_number=COALESCE($5,forwarding_number),destination_number=COALESCE($6,destination_number) WHERE id=$1",[callId,route?.tracking_number_id??null,route?.forwarding_number_id??null,route?.tracking_number??null,route?.forwarding_number??null,route?.destination_number??null]);
       }
+      await publishCallUpdated(callId);
       if(event.recordingUrl) await createJob("call.process","call",callId,{}, {forceRequeue:true});
       await attributeCallToLead(callId,existing.rows[0].site_id,event.callerNumber,event.startedAt,event.calledNumber);
       return reply.send({ok:true,updated:true,call_id:callId});

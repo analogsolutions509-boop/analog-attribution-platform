@@ -3,8 +3,9 @@ import twilio from "twilio";
 import { config } from "../config.js";
 import { db } from "../db.js";
 import { createJob } from "../jobs.js";
+import { queueAnalogOSEvent } from "../analog-os-outbox.js";
 import { attributeCallToLead } from "../leads.js";
-import { upsertIncomingCall } from "../calls.js";
+import { publishCallUpdated, upsertIncomingCall } from "../calls.js";
 import {
   buildIncomingCallTwiml,
   buildCustomerConferenceTwiml,
@@ -224,10 +225,11 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
     const friendlyName = typeof body.FriendlyName === "string" ? body.FriendlyName.trim() : "";
     const event = typeof body.StatusCallbackEvent === "string" ? body.StatusCallbackEvent.trim() : "";
     if (friendlyName) {
-      await db.query(
-        "UPDATE calls SET status=CASE WHEN $2='conference-end' THEN 'completed' WHEN $2='conference-start' THEN 'in-progress' ELSE status END, ended_at=CASE WHEN $2='conference-end' THEN COALESCE(ended_at,NOW()) ELSE ended_at END, duration_seconds=CASE WHEN $2='conference-end' THEN COALESCE(duration_seconds, GREATEST(0, EXTRACT(EPOCH FROM (NOW()-started_at))::int)) ELSE duration_seconds END, updated_at=NOW() WHERE provider='twilio' AND conference_name=$1",
+      const updated = await db.query(
+        "UPDATE calls SET status=CASE WHEN $2='conference-end' THEN 'completed' WHEN $2='conference-start' THEN 'in-progress' ELSE status END, ended_at=CASE WHEN $2='conference-end' THEN COALESCE(ended_at,NOW()) ELSE ended_at END, duration_seconds=CASE WHEN $2='conference-end' THEN COALESCE(duration_seconds, GREATEST(0, EXTRACT(EPOCH FROM (NOW()-started_at))::int)) ELSE duration_seconds END, updated_at=NOW() WHERE provider='twilio' AND conference_name=$1 RETURNING id",
         [friendlyName, event]
       );
+      if (updated.rowCount) await publishCallUpdated(updated.rows[0].id as string);
     }
     return reply.type("text/xml; charset=utf-8").send("<Response></Response>");
   });
@@ -262,10 +264,12 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
       ]
     );
 
+    if (result.rowCount) await publishCallUpdated(result.rows[0].id as string);
+
     if (!result.rowCount) {
       const site = await resolveSiteByNumber(call.calledNumber);
       if (!site) return reply.code(422).send({ error: "site_resolution_failed" });
-      await upsertIncomingCall({
+      const newCallId = await upsertIncomingCall({
         siteId: site.id,
         siteName: site.name,
         hostname: site.hostname,
@@ -278,6 +282,7 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
         endedAt: call.endedAt,
         durationSeconds: call.durationSeconds
       });
+      await publishCallUpdated(newCallId);
     }
 
     return reply.type("text/xml; charset=utf-8").send("<Response></Response>");
@@ -311,7 +316,12 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
       : await db.query("UPDATE calls SET recording_source_url=$2, recording_status='ready', updated_at=NOW() WHERE provider='twilio' AND conference_name=$1 RETURNING id", [conferenceName, recordingUrl]);
     if (!result.rowCount) return reply.code(404).send({ error: "call_not_found" });
 
-    await createJob("call.process", "call", result.rows[0].id, {}, { forceRequeue: true });
+    const readyCallId = result.rows[0].id as string;
+    await queueAnalogOSEvent("recording.ready", "call", readyCallId, {
+      call_id: readyCallId, recording_url: recordingUrl, recording_status: "ready"
+    });
+    await publishCallUpdated(readyCallId);
+    await createJob("call.process", "call", readyCallId, {}, { forceRequeue: true });
     return reply.send({ ok: true, call_id: result.rows[0].id, status: "recording_ready" });
   });
 }
