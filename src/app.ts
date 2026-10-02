@@ -21,6 +21,7 @@ import { registerReportRoutes } from "./routes/reports.js";
 import { registerLeadSearchRoutes } from "./routes/lead-search.js";
 import { registerDidwwRoutes } from "./routes/didww.js";
 import { registerTwilioRoutes } from "./routes/twilio.js";
+import { registerWhatConvertsRoutes } from "./routes/whatconverts.js";
 
 export function buildApp() {
   const app = Fastify({
@@ -71,6 +72,7 @@ export function buildApp() {
   app.register(registerCallRoutes);
   app.register(registerSecondRingRoutes);
   app.register(registerTwilioRoutes);
+  app.register(registerWhatConvertsRoutes);
   app.register(registerTelephonyRoutes);
   app.register(registerLeadRoutes);
   app.register(registerSupplierRoutes);
