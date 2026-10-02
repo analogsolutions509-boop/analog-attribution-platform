@@ -28,7 +28,25 @@ export const PRESSPILOT_PLAN_JSON_SCHEMA = {
         additionalProperties: false,
         properties: {
           op: { type: "string", enum: operations },
-          args: { type: "object", additionalProperties: true }
+          args: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              id: { type: ["integer", "null"] },
+              search: { type: ["string", "null"] },
+              status: { type: ["string", "null"] },
+              slug: { type: ["string", "null"] },
+              author: { type: ["integer", "string", "null"] },
+              page: { type: ["integer", "null"] },
+              orderby: { type: ["string", "null"] },
+              order: { type: ["string", "null"] },
+              per_page: { type: ["integer", "null"] },
+              title: { type: ["string", "null"] },
+              content: { type: ["string", "null"] },
+              excerpt: { type: ["string", "null"] }
+            },
+            required: ["id", "search", "status", "slug", "author", "page", "orderby", "order", "per_page", "title", "content", "excerpt"]
+          }
         },
         required: ["op", "args"]
       }
@@ -77,12 +95,22 @@ export async function planPressPilotTask(
   if (!response.ok) {
     throw new Error("presspilot_planner_failed:" + response.status + ":" + (await response.text()).slice(0, 300));
   }
-  const body = await response.json() as { output_text?: string };
-  if (!body.output_text) throw new Error("presspilot_planner_missing_output");
+  const body = await response.json() as {
+    output_text?: string;
+    output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>;
+  };
+  const outputText = body.output_text ?? body.output
+    ?.filter((item) => item.type === "message")
+    .flatMap((item) => item.content ?? [])
+    .filter((part) => part.type === "output_text" && typeof part.text === "string")
+    .map((part) => part.text as string)
+    .join("")
+    .trim();
+  if (!outputText) throw new Error("presspilot_planner_missing_output");
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(body.output_text);
+    parsed = JSON.parse(outputText);
   } catch {
     throw new Error("invalid_plan");
   }

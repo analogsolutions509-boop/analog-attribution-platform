@@ -18,6 +18,21 @@ test("planner accepts OpenAI structured plans and keeps them within the PressPil
   assert.equal(plan.operations[1].op, "update_page");
 });
 
+test("planner reads structured text from the raw Responses API output array", async () => {
+  const fetcher = async () =>
+    new Response(JSON.stringify({
+      output: [{
+        type: "message",
+        content: [{
+          type: "output_text",
+          text: JSON.stringify({ summary: "Read the site", operations: [{ op: "get_site", args: { id: null, search: null, status: null, slug: null, author: null, page: null, orderby: null, order: null, per_page: null, title: null, content: null, excerpt: null } }] })
+        }]
+      }]
+    }), { status: 200 });
+  const plan = await planPressPilotTask("Read the site", "test-key", "gpt-6-luna", fetcher);
+  assert.equal(plan.operations[0].op, "get_site");
+});
+
 test("planner rejects malformed model output", async () => {
   const fetcher = async () => new Response(JSON.stringify({ output_text: "{bad" }), { status: 200 });
   await assert.rejects(
