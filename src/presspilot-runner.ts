@@ -4,7 +4,7 @@ import type { WordPressClient } from "./presspilot.js";
 type Client = Pick<
   WordPressClient,
   "getSite" | "listPosts" | "listPages" | "createPost" | "updatePost" |
-  "createPage" | "updatePage" | "listPlugins" | "searchContent" | "getPost" | "getPage"
+  "createPage" | "updatePage" | "listPlugins" | "searchContent" | "elementorEditText" | "getPost" | "getPage"
 >;
 
 export interface PressPilotOperationResult {
@@ -19,7 +19,7 @@ export interface PressPilotRunResult {
   operations: PressPilotOperationResult[];
 }
 
-const MUTATIONS = new Set(["create_post","update_post","create_page","update_page"]);
+const MUTATIONS = new Set(["create_post","update_post","create_page","update_page","elementor_edit_text"]);
 
 function mutationId(op: string, result: unknown, args: Record<string, unknown>): number | null {
   const candidate = args.id ?? (result && typeof result === "object" ? (result as Record<string, unknown>).id : null);
@@ -50,12 +50,18 @@ export async function executePressPilotPlan(
       case "update_page": result = await client.updatePage(args); break;
       case "list_plugins": result = await client.listPlugins(); break;
       case "search_content": result = await client.searchContent(args); break;
+      case "elementor_edit_text": result = await client.elementorEditText(args); break;
     }
 
     const item: PressPilotOperationResult = { op: operation.op, status: "completed", result };
     if (MUTATIONS.has(operation.op)) {
       const id = mutationId(operation.op, result, args);
-      if (id !== null) {
+      if (operation.op === "elementor_edit_text") {
+        const verification = result && typeof result === "object"
+          ? (result as Record<string, unknown>).verification
+          : undefined;
+        if (verification !== undefined) item.verification = verification;
+      } else if (id !== null) {
         item.verification = operation.op.includes("post")
           ? await client.getPost(id)
           : await client.getPage(id);

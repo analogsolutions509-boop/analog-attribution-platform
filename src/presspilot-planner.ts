@@ -11,7 +11,8 @@ const operations = [
   "create_page",
   "update_page",
   "list_plugins",
-  "search_content"
+  "search_content",
+  "elementor_edit_text"
 ] as const;
 
 export const PRESSPILOT_PLAN_JSON_SCHEMA = {
@@ -43,9 +44,11 @@ export const PRESSPILOT_PLAN_JSON_SCHEMA = {
               per_page: { type: ["integer", "null"] },
               title: { type: ["string", "null"] },
               content: { type: ["string", "null"] },
-              excerpt: { type: ["string", "null"] }
+              excerpt: { type: ["string", "null"] },
+              widget_type: { type: ["string", "null"] },
+              replace_all: { type: ["boolean", "null"] }
             },
-            required: ["id", "search", "status", "slug", "author", "page", "orderby", "order", "per_page", "title", "content", "excerpt"]
+            required: ["id", "search", "status", "slug", "author", "page", "orderby", "order", "per_page", "title", "content", "excerpt", "widget_type", "replace_all"]
           }
         },
         required: ["op", "args"]
@@ -62,6 +65,10 @@ const PLANNER_INSTRUCTIONS = [
   "For mutations, provide only the fields needed for the requested change.",
   "Keep content concise and preserve existing content unless the user explicitly asks to replace it.",
   "Never invent IDs, URLs, credentials, capabilities, or facts about the site.",
+  "For Elementor text or layout requests, use elementor_edit_text when the requested change can be expressed as an exact text replacement inside an Elementor widget.",
+  "For requests to put one part of a phrase underneath another part, preserve the wording and insert a <br> at the requested line break.",
+  "For an explicitly site-wide/global change, elementor_edit_text may use id=null with replace_all=true; otherwise target the specific discovered page id.",
+  "For Elementor text operations, widget_type should be used when the request identifies a heading, paragraph, button, or other widget type.",
   "When the request cannot be completed with the allowed operations, return the safest useful read/search operations instead."
 ].join("\n");
 

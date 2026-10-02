@@ -83,6 +83,20 @@ export class WordPressClient {
     return this.request<unknown[]>("/wp-json/wp/v2/search?" + params.toString());
   }
 
+  async elementorEditText(args: Record<string, unknown>) {
+    const id = numericId(args.id);
+    const find = String(args.search ?? "").trim();
+    const replace = String(args.content ?? "");
+    if (!find) throw new Error("elementor_text_search_required");
+    return this.request<Record<string, unknown>>("/wp-json/wpvibe/v1/content/edit", {
+      method: "POST",
+      body: JSON.stringify({
+        target_type: "meta", post_id: id, meta_key: "_elementor_data",
+        old_content: find, new_content: replace, replace_all: args.replace_all === true
+      })
+    });
+  }
+
   async createPost(args: Record<string, unknown>) {
     return this.request<Record<string, unknown>>("/wp-json/wp/v2/posts", {
       method: "POST",
@@ -267,6 +281,7 @@ export class PressPilotAgentClient {
   async listPages(args: Record<string, unknown>) { return this.call<unknown[]>("list_pages", args); }
   async listPlugins() { return this.call<unknown[]>("list_plugins"); }
   async searchContent(args: Record<string, unknown>) { return this.call<unknown[]>("search_content", args); }
+  async elementorEditText(args: Record<string, unknown>) { return this.call<Record<string, unknown>>("elementor_edit_text", args); }
 
 async createPost(args: Record<string, unknown>) {
     return this.call<Record<string, unknown>>("create_post", args);

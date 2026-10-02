@@ -35,7 +35,8 @@ export const PRESSPILOT_OPERATIONS = [
   "create_page",
   "update_page",
   "list_plugins",
-  "search_content"
+  "search_content",
+  "elementor_edit_text"
 ] as const;
 
 export type PressPilotOperation = typeof PRESSPILOT_OPERATIONS[number];
@@ -49,7 +50,8 @@ const operationSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("create_page"), args: z.record(z.string(), z.unknown()) }),
   z.object({ op: z.literal("update_page"), args: z.record(z.string(), z.unknown()) }),
   z.object({ op: z.literal("list_plugins"), args: z.record(z.string(), z.unknown()).default({}) }),
-  z.object({ op: z.literal("search_content"), args: z.record(z.string(), z.unknown()) })
+  z.object({ op: z.literal("search_content"), args: z.record(z.string(), z.unknown()) }),
+  z.object({ op: z.literal("elementor_edit_text"), args: z.record(z.string(), z.unknown()) })
 ]);
 
 export const pressPilotPlanSchema = z.object({
