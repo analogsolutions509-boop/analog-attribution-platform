@@ -113,6 +113,10 @@ export function buildDashboardNumbersQuery(): string {
              tn.destination_supplier_id,
              dst.name AS destination_supplier_name,
              COALESCE(NULLIF(dst.contact_phone,''),NULLIF(dst.endpoint_url,''),dst.name) AS destination_number,
+             tn.forwarding_number_id,
+             fn.phone_number AS forwarding_number,
+             fn.label AS forwarding_label,
+             fn.provider AS forwarding_provider,
              COUNT(DISTINCT na.id)::int AS active_assignments,
              COUNT(DISTINCT ss.supplier_id)::int AS destination_count,
              COALESCE(
@@ -131,13 +135,14 @@ export function buildDashboardNumbersQuery(): string {
       FROM tracking_numbers tn
       JOIN sites s ON s.id=tn.site_id
       LEFT JOIN suppliers dst ON dst.id=tn.destination_supplier_id
+      LEFT JOIN forwarding_numbers fn ON fn.id=tn.forwarding_number_id
       LEFT JOIN number_assignments na
         ON na.tracking_number_id=tn.id AND na.expires_at>NOW()
       LEFT JOIN site_suppliers ss
         ON ss.site_id=s.id AND ss.active
       LEFT JOIN suppliers sp
         ON sp.id=ss.supplier_id AND sp.status='active'
-      GROUP BY tn.id,s.id,dst.id
+      GROUP BY tn.id,s.id,dst.id,fn.id
       ORDER BY s.name,tn.phone_number
     `;
 }

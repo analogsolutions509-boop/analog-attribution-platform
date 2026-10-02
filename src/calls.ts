@@ -5,6 +5,27 @@ import { analyzeTranscript } from "./call-intelligence/analyze.js";
 import { transcribeFile } from "./call-intelligence/transcribe.js";
 import { queueAnalogOSEvent } from "./analog-os-outbox.js";
 import { queueNotification } from "./notifications.js";
+import { normalizePhone } from "./utils/phone.js";
+
+export async function resolveCallNumberRoute(siteId: string, calledNumber?: string) {
+  const normalized = normalizePhone(calledNumber);
+  if (!normalized) return null;
+  const result = await db.query(
+    `SELECT tn.id AS tracking_number_id,
+            tn.phone_number AS tracking_number,
+            tn.forwarding_number_id,
+            fn.phone_number AS forwarding_number,
+            COALESCE(NULLIF(s.contact_phone,''),NULLIF(s.endpoint_url,'')) AS destination_number
+     FROM tracking_numbers tn
+     LEFT JOIN forwarding_numbers fn ON fn.id=tn.forwarding_number_id
+     LEFT JOIN suppliers s ON s.id=tn.destination_supplier_id
+     WHERE tn.site_id=$1
+       AND regexp_replace(tn.phone_number,'\\D','','g')=$2
+     LIMIT 1`,
+    [siteId, normalized]
+  );
+  return result.rows[0] ?? null;
+}
 
 export type IncomingCall = {
   siteId: string;
@@ -23,11 +44,15 @@ export type IncomingCall = {
 };
 
 export async function upsertIncomingCall(input: IncomingCall): Promise<string> {
+  const route = input.direction?.toLowerCase() === "outbound"
+    ? null
+    : await resolveCallNumberRoute(input.siteId, input.calledNumber);
   const result = await db.query(
     `INSERT INTO calls(
       site_id, provider, provider_call_id, caller_number, called_number, direction,
-      started_at, ended_at, duration_seconds, recording_source_url, recording_mime_type
-    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      started_at, ended_at, duration_seconds, recording_source_url, recording_mime_type,
+      tracking_number_id, forwarding_number_id, tracking_number, forwarding_number, destination_number
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
     ON CONFLICT(provider, provider_call_id) DO UPDATE SET
       caller_number=COALESCE(EXCLUDED.caller_number,calls.caller_number),
       called_number=COALESCE(EXCLUDED.called_number,calls.called_number),
@@ -37,6 +62,11 @@ export async function upsertIncomingCall(input: IncomingCall): Promise<string> {
       duration_seconds=COALESCE(EXCLUDED.duration_seconds,calls.duration_seconds),
       recording_source_url=COALESCE(EXCLUDED.recording_source_url,calls.recording_source_url),
       recording_mime_type=COALESCE(EXCLUDED.recording_mime_type,calls.recording_mime_type),
+      tracking_number_id=COALESCE(EXCLUDED.tracking_number_id,calls.tracking_number_id),
+      forwarding_number_id=COALESCE(EXCLUDED.forwarding_number_id,calls.forwarding_number_id),
+      tracking_number=COALESCE(EXCLUDED.tracking_number,calls.tracking_number),
+      forwarding_number=COALESCE(EXCLUDED.forwarding_number,calls.forwarding_number),
+      destination_number=COALESCE(EXCLUDED.destination_number,calls.destination_number),
       updated_at=NOW()
     RETURNING id`,
     [
@@ -50,7 +80,12 @@ export async function upsertIncomingCall(input: IncomingCall): Promise<string> {
       input.endedAt ?? null,
       input.durationSeconds ?? null,
       input.recordingUrl ?? null,
-      input.recordingMimeType ?? null
+      input.recordingMimeType ?? null,
+      route?.tracking_number_id ?? null,
+      route?.forwarding_number_id ?? null,
+      route?.tracking_number ?? input.calledNumber ?? null,
+      route?.forwarding_number ?? null,
+      route?.destination_number ?? null
     ]
   );
   const callId = result.rows[0].id as string;
@@ -63,6 +98,11 @@ export async function upsertIncomingCall(input: IncomingCall): Promise<string> {
     provider_call_id: input.providerCallId,
     caller_number: input.callerNumber ?? null,
     called_number: input.calledNumber ?? null,
+    tracking_number: route?.tracking_number ?? input.calledNumber ?? null,
+    forwarding_number: route?.forwarding_number ?? null,
+    destination_number: route?.destination_number ?? null,
+    tracking_number_id: route?.tracking_number_id ?? null,
+    forwarding_number_id: route?.forwarding_number_id ?? null,
     direction: input.direction ?? null,
     started_at: input.startedAt ?? null,
     ended_at: input.endedAt ?? null,

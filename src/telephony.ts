@@ -10,6 +10,7 @@ export type TransferRequest = {
   mode: "blind" | "warm";
   timeout?: number;
   websiteName?: string;
+  forwardingNumber?: string;
 };
 
 export function getWazoClient(): WazoClient | null {
@@ -29,7 +30,8 @@ export async function executeWazoTransfer(input: TransferRequest) {
     timeout: input.timeout ?? 20,
     variables: {
       ANALOG_WEBSITE_NAME: input.websiteName ?? "",
-      ANALOG_CALL_ID: input.callId
+      ANALOG_CALL_ID: input.callId,
+      ANALOG_FORWARDING_NUMBER: input.forwardingNumber ?? ""
     }
   });
 }
