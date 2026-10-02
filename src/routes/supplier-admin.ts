@@ -103,9 +103,9 @@ export async function registerSupplierAdminRoutes(app: FastifyInstance) {
         await client.query("UPDATE tracking_numbers SET forwarding_number_id=$2,destination_supplier_id=$3,active=$4 WHERE id=$1",[r.trackingNumberId,r.forwardingNumberId,r.supplierId,r.active]);
         await client.query("COMMIT");
         return reply.send({ok:true,route:{tracking_number_id:r.trackingNumberId,tracking_number:tracking.rows[0].phone_number,forwarding_number_id:r.forwardingNumberId,forwarding_number:forwarding.rows[0].phone_number,destination_number:supplier.rows[0].contact_phone || supplier.rows[0].endpoint_url,website:site.rows[0],supplier:{id:supplier.rows[0].id,name:supplier.rows[0].name},assignment:assignment.rows[0]}});
-      } catch(e) { await client.query("ROLLBACK"); const code=Number(e?.statusCode)||409; if(String(e).includes("site_suppliers_site_id_rank_key")) return reply.code(409).send({error:"rank_already_assigned"}); return reply.code(code).send({error:String(e?.message||e).replace(/[<>]/g,"")}); }
+      } catch(e) { await client.query("ROLLBACK"); const code=Number((e as any)?.statusCode)||409; if(String(e).includes("site_suppliers_site_id_rank_key")) return reply.code(409).send({error:"rank_already_assigned"}); return reply.code(code).send({error:String((e as any)?.message||e).replace(/[<>]/g,"")}); }
       finally { client.release(); }
-    } catch(e) { return reply.code(400).send({error:String(e?.message||e).replace(/[<>]/g,"")}); }
+    } catch(e) { return reply.code(400).send({error:String((e as any)?.message||e).replace(/[<>]/g,"")}); }
   });
 
   app.delete<{Params:{assignmentId:string}}>("/v1/dashboard/site-supplier-assignments/:assignmentId", async (request, reply) => {
