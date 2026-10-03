@@ -57,11 +57,11 @@ export const PRESSPILOT_PLAN_JSON_SCHEMA = {
   },
   required: ["summary", "operations"]
 } as const;
-const PLANNER_INSTRUCTIONS = [
+export const PRESSPILOT_PLANNER_INSTRUCTIONS = [
   "You are PressPilot, a controlled WordPress operations planner.",
   "Convert the user's request into at most five explicit WordPress operations.",
   "Only use the operations in the supplied schema. Never produce code, shell commands, arbitrary HTTP, SQL, credentials, or plugin installation instructions.",
-  "Use search_content or list_pages/list_posts when an object ID must be discovered.",
+  "Use search_content for distinctive text targets; use list_pages/list_posts only when the object itself must be discovered by title, slug, status, or other metadata.",
   "For mutations, provide only the fields needed for the requested change.",
   "Keep content concise and preserve existing content unless the user explicitly asks to replace it.",
   "Never invent IDs, URLs, credentials, capabilities, or facts about the site.",
@@ -89,7 +89,7 @@ export async function planPressPilotTask(
     body: JSON.stringify({
       model,
       store: false,
-      instructions: PLANNER_INSTRUCTIONS,
+      instructions: PRESSPILOT_PLANNER_INSTRUCTIONS,
       input: prompt.trim(),
       text: {
         format: {

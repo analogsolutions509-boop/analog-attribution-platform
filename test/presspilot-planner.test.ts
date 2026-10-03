@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { planPressPilotTask } from "../src/presspilot-planner.js";
+import { planPressPilotTask, PRESSPILOT_PLANNER_INSTRUCTIONS } from "../src/presspilot-planner.js";
 
 test("planner accepts OpenAI structured plans and keeps them within the PressPilot allowlist", async () => {
   const fetcher = async () =>
@@ -31,6 +31,11 @@ test("planner reads structured text from the raw Responses API output array", as
     }), { status: 200 });
   const plan = await planPressPilotTask("Read the site", "test-key", "gpt-6-luna", fetcher);
   assert.equal(plan.operations[0].op, "get_site");
+});
+
+test("planner prioritizes exact text search over guessed page-title discovery", () => {
+  assert.match(PRESSPILOT_PLANNER_INSTRUCTIONS, /Use search_content for distinctive text targets/);
+  assert.match(PRESSPILOT_PLANNER_INSTRUCTIONS, /Never infer site-wide or all-pages scope/);
 });
 
 test("planner rejects malformed model output", async () => {
