@@ -1,6 +1,6 @@
 PressPilot Agent
 =============
-Version 0.2.0
+Version 0.2.1
 By Analog Solutions
 
 DESCRIPTION

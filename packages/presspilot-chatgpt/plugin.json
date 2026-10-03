@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "presspilot",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Secure AI command center for managing connected WordPress sites through controlled, auditable PressPilot tools.",
   "author": {
     "name": "Analog Solutions",

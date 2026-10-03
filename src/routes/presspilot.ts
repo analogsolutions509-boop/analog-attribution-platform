@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
@@ -18,6 +17,13 @@ import {
 } from "../presspilot.js";
 import { requireDashboard } from "./dashboard.js";
 import { pressPilotMcpNodeHandler } from "../presspilot-mcp.js";
+import {
+  buildOAuthChallenge,
+  buildPressPilotResourceMetadataUrl,
+  buildProtectedResourceMetadata,
+  buildPressPilotResourceUrl,
+  verifyPressPilotAuthorizationHeader
+} from "../presspilot-mcp-auth.js";
 
 const UI_ROOT = join(process.cwd(), "public");
 
@@ -32,22 +38,55 @@ function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function validMcpToken(header: string | undefined): boolean {
-  const expected = config.PRESSPILOT_MCP_TOKEN;
-  if (!expected || !header?.startsWith("Bearer ")) return false;
-  const supplied = Buffer.from(header.slice(7), "utf8");
-  const target = Buffer.from(expected, "utf8");
-  return supplied.length === target.length && timingSafeEqual(supplied, target);
+function oauthIssuer(): string | undefined {
+  const domain = config.AUTH0_DOMAIN?.trim();
+  if (!domain) return undefined;
+  return domain.startsWith("http://") || domain.startsWith("https://")
+    ? domain
+    : "https://" + domain;
 }
+
+function oauthScopes(): string[] {
+  return config.PRESSPILOT_OAUTH_SCOPES
+    .split(",")
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+}
+
+function oauthResource(): string {
+  const configured = config.PRESSPILOT_OAUTH_AUDIENCE ?? config.PUBLIC_API_URL;
+  if (!configured) throw new Error("presspilot_oauth_audience_required");
+  return buildPressPilotResourceUrl(configured);
+}
+
 export async function registerPressPilotRoutes(app: FastifyInstance) {
+  app.get("/.well-known/oauth-protected-resource", async (_request, reply) => {
+    const issuer = oauthIssuer();
+    if (!issuer) return reply.code(503).send({ error: "presspilot_oauth_not_configured" });
+    const resource = oauthResource();
+    return reply.send(buildProtectedResourceMetadata(resource, issuer, oauthScopes()));
+  });
+
   app.all("/mcp", async (request, reply) => {
-    if (!config.PRESSPILOT_MCP_TOKEN) {
-      return reply.code(503).send({ error: "presspilot_mcp_not_configured" });
+    const resource = oauthResource();
+    const issuer = oauthIssuer();
+    const metadataUrl = buildPressPilotResourceMetadataUrl(resource);
+
+    try {
+      const auth = await verifyPressPilotAuthorizationHeader(request.headers.authorization, {
+        issuer,
+        resource,
+        developmentToken: config.PRESSPILOT_MCP_TOKEN
+      });
+      Object.assign(request.raw, { auth });
+      return pressPilotMcpNodeHandler(request.raw, reply.raw, request.body);
+    } catch {
+      const challenge = buildOAuthChallenge(metadataUrl, oauthScopes());
+      return reply
+        .code(401)
+        .header("WWW-Authenticate", challenge)
+        .send({ error: "unauthorized" });
     }
-    if (!validMcpToken(request.headers.authorization)) {
-      return reply.code(401).header("WWW-Authenticate", "Bearer").send({ error: "unauthorized" });
-    }
-    return pressPilotMcpNodeHandler(request.raw, reply.raw, request.body);
   });
 
   app.get("/presspilot", async (_request, reply) => {

@@ -2,12 +2,12 @@
 /**
  * Plugin Name: PressPilot Agent
  * Description: Secure WordPress execution bridge for Analog Solutions PressPilot.
- * Version: 0.1.0
+ * Version: 0.2.1
  * Author: Analog Solutions
  */
 defined('ABSPATH') || exit;
 
-const PRESSPILOT_AGENT_VERSION = '0.1.0';
+const PRESSPILOT_AGENT_VERSION = '0.2.1';
 const PRESSPILOT_AGENT_TOKEN_HASH = 'presspilot_agent_token_hash';
 const PRESSPILOT_AGENT_CONNECTION_ID = 'presspilot_agent_connection_id';
 const PRESSPILOT_AGENT_API_BASE = 'presspilot_agent_api_base';

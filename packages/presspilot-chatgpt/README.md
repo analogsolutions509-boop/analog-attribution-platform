@@ -11,7 +11,7 @@ The installable package is generated from wordpress/presspilot-agent/presspilot-
 
 ## ChatGPT package
 
-The package uses the portable Agent Plugins manifest plus a streamable HTTP MCP server configuration. The hosted MCP endpoint currently requires the PressPilot bearer token for development. For public ChatGPT distribution, this authentication boundary must be replaced or fronted by OAuth 2.1 and then submitted for review.
+The package uses the portable Agent Plugins manifest plus a streamable HTTP MCP server configuration. The hosted MCP endpoint uses OAuth 2.1 for ChatGPT authentication and keeps the legacy bearer token only as a development fallback. Public ChatGPT distribution requires the production Auth0 API audience/scopes to be configured before submission.
 
 ## Hosted MCP endpoint
 
