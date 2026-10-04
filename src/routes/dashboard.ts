@@ -287,6 +287,11 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
     return reply.type("application/manifest+json").send(body);
   });
 
+  app.get("/dashboard/analog-os-icon.png", async (_request, reply) => {
+    const body = await readFile(join(UI_ROOT, "analog-os-icon.png"));
+    return reply.type("image/png").send(body);
+  });
+
   app.get("/suppliers.js", async (_request, reply) => {
     const body = await readFile(join(UI_ROOT, "suppliers.js"), "utf8");
     return reply.type("application/javascript; charset=utf-8").send(body);
