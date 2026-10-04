@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
 const PAIRING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -24,6 +24,20 @@ export function generateAgentToken(): string {
 
 export function hashAgentToken(token: string, _secret?: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+export function generateEnrollmentToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+export function hashEnrollmentToken(token: string, secret: string): string {
+  return createHash("sha256").update(secret + ":enrollment:" + token, "utf8").digest("hex");
+}
+
+export function isPressPilotBridgeSecretValid(presented: string, expected: string): boolean {
+  const left = Buffer.from(presented, "utf8");
+  const right = Buffer.from(expected, "utf8");
+  return left.length === right.length && left.length > 0 && timingSafeEqual(left, right);
 }
 
 export const PRESSPILOT_OPERATIONS = [

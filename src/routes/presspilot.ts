@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
+import { isPressPilotBridgeSecretValid } from "../presspilot-core.js";
 import { db } from "../db.js";
 import { executePressPilotPlan } from "../presspilot-runner.js";
 import { planPressPilotTask } from "../presspilot-planner.js";
@@ -9,6 +10,10 @@ import {
   createWordPressClient,
   createPressPilotPairing,
   claimPressPilotPairing,
+  createPressPilotEnrollment,
+  claimPressPilotEnrollment,
+  rotatePressPilotAgentToken,
+  revokePressPilotAgentToken,
   getPressPilotConnection,
   getPressPilotExecutor,
   listPressPilotConnections,
@@ -36,6 +41,12 @@ function publicConnection(connection: Awaited<ReturnType<typeof listPressPilotCo
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function requireMainWpBridgeSecret(request: { headers: Record<string, unknown> }): boolean {
+  const expected = config.PRESSPILOT_MAINWP_SECRET;
+  const presented = asString(request.headers["x-presspilot-mainwp-key"]);
+  return Boolean(expected && isPressPilotBridgeSecretValid(presented, expected));
 }
 
 function oauthIssuer(): string | undefined {
@@ -129,6 +140,68 @@ export async function registerPressPilotRoutes(app: FastifyInstance) {
     }
   });
 
+  app.post("/v1/presspilot/enrollments", async (request, reply) => {
+    const username = await requireDashboard(app, request, reply);
+    if (!username) return;
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const siteUrl = asString(body.site_url);
+    if (!siteUrl) return reply.code(400).send({ error: "site_url_required" });
+    try {
+      return reply.code(201).send(await createPressPilotEnrollment(siteUrl, username));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "enrollment_create_failed";
+      return reply.code(400).send({ error: message.split(":")[0] });
+    }
+  });
+
+  app.post("/v1/presspilot/enroll", async (request, reply) => {
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const token = asString(body.token);
+    const siteUrl = asString(body.site_url);
+    if (!token || !siteUrl) return reply.code(400).send({ error: "token_site_url_required" });
+    try {
+      return reply.code(201).send(await claimPressPilotEnrollment({
+        token,
+        siteUrl,
+        agentName: asString(body.agent_name) || undefined,
+        agentVersion: asString(body.agent_version) || undefined
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "enrollment_claim_failed";
+      return reply.code(400).send({ error: message.split(":")[0] });
+    }
+  });
+
+  app.post("/v1/presspilot/mainwp/enrollment", async (request, reply) => {
+    if (!requireMainWpBridgeSecret(request)) return reply.code(401).send({ error: "mainwp_bridge_unauthorized" });
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const siteUrl = asString(body.site_url);
+    if (!siteUrl) return reply.code(400).send({ error: "site_url_required" });
+    try {
+      return reply.code(201).send(await createPressPilotEnrollment(siteUrl, "mainwp"));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "mainwp_enrollment_failed";
+      return reply.code(400).send({ error: message.split(":")[0] });
+    }
+  });
+
+  app.get("/v1/presspilot/mainwp/status", async (request, reply) => {
+    if (!requireMainWpBridgeSecret(request)) return reply.code(401).send({ error: "mainwp_bridge_unauthorized" });
+    const siteUrl = asString((request.query as { site_url?: string }).site_url);
+    if (!siteUrl) return reply.code(400).send({ error: "site_url_required" });
+    try {
+      const baseUrl = new URL(siteUrl).origin.toLowerCase();
+      const result = await db.query(
+        "SELECT id,site_id,base_url,status,connection_mode,agent_endpoint,agent_version,last_verified_at,last_error,agent_last_seen_at,created_at FROM presspilot_connections WHERE base_url=$1 ORDER BY created_at DESC LIMIT 1",
+        [baseUrl]
+      );
+      return reply.send({ connection: result.rows[0] ?? null });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "mainwp_status_failed";
+      return reply.code(400).send({ error: message.split(":")[0] });
+    }
+  });
+
   app.post("/v1/presspilot/onboard-agent", async (request, reply) => {
     const username = await requireDashboard(app, request, reply);
     if (!username) return;
@@ -210,6 +283,28 @@ export async function registerPressPilotRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: message.split(":")[0] });
     }
   });
+  app.post<{ Params: { id: string } }>("/v1/presspilot/connections/:id/rotate-agent-token", async (request, reply) => {
+    if (!(await requireDashboard(app, request, reply))) return;
+    try {
+      const connection = await rotatePressPilotAgentToken(request.params.id);
+      return reply.send({ connection: publicConnection(connection), rotated: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "presspilot_agent_rotation_failed";
+      return reply.code(502).send({ error: message.split(":")[0] });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/v1/presspilot/connections/:id/revoke-agent-token", async (request, reply) => {
+    if (!(await requireDashboard(app, request, reply))) return;
+    try {
+      const connection = await revokePressPilotAgentToken(request.params.id);
+      return reply.send({ connection: publicConnection(connection), revoked: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "presspilot_agent_revocation_failed";
+      return reply.code(502).send({ error: message.split(":")[0] });
+    }
+  });
+
   app.post("/v1/presspilot/execute", async (request, reply) => {
     const username = await requireDashboard(app, request, reply);
     if (!username) return;

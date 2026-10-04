@@ -2,12 +2,12 @@
 /**
  * Plugin Name: PressPilot Agent
  * Description: Secure WordPress execution bridge for Analog Solutions PressPilot.
- * Version: 0.2.1
+ * Version: 0.2.3
  * Author: Analog Solutions
  */
 defined('ABSPATH') || exit;
 
-const PRESSPILOT_AGENT_VERSION = '0.2.1';
+const PRESSPILOT_AGENT_VERSION = '0.2.3';
 const PRESSPILOT_AGENT_TOKEN_HASH = 'presspilot_agent_token_hash';
 const PRESSPILOT_AGENT_CONNECTION_ID = 'presspilot_agent_connection_id';
 const PRESSPILOT_AGENT_API_BASE = 'presspilot_agent_api_base';
@@ -19,10 +19,25 @@ add_action('rest_api_init', static function () {
         'permission_callback' => '__return_true',
         'callback' => 'presspilot_agent_pair',
     ]);
+    register_rest_route('presspilot/v1', '/enroll', [
+        'methods' => 'POST',
+        'permission_callback' => '__return_true',
+        'callback' => 'presspilot_agent_enroll',
+    ]);
     register_rest_route('presspilot/v1', '/agent', [
         'methods' => 'POST',
         'permission_callback' => '__return_true',
         'callback' => 'presspilot_agent_execute',
+    ]);
+    register_rest_route('presspilot/v1', '/rotate', [
+        'methods' => 'POST',
+        'permission_callback' => '__return_true',
+        'callback' => 'presspilot_agent_rotate_token',
+    ]);
+    register_rest_route('presspilot/v1', '/revoke', [
+        'methods' => 'POST',
+        'permission_callback' => '__return_true',
+        'callback' => 'presspilot_agent_revoke_token',
     ]);
 });
 
@@ -47,6 +62,12 @@ function presspilot_agent_bearer_token(): string {
 
 function presspilot_agent_json_error(string $code, string $message, int $status = 400): WP_Error {
     return new WP_Error($code, $message, ['status' => $status]);
+}
+
+function presspilot_agent_authorized(): bool {
+    $token = presspilot_agent_bearer_token();
+    $stored = (string) get_option(PRESSPILOT_AGENT_TOKEN_HASH, '');
+    return $token !== '' && $stored !== '' && hash_equals($stored, presspilot_agent_hash_token($token));
 }
 
 function presspilot_agent_is_paired(): bool {
@@ -93,10 +114,79 @@ function presspilot_agent_pair(WP_REST_Request $request) {
     ], 201);
 }
 
+function presspilot_agent_enroll_with_token(string $api_base, string $enrollment_token) {
+    $api_base = untrailingslashit(trim($api_base));
+    $enrollment_token = trim($enrollment_token);
+    if ($api_base === '' || wp_parse_url($api_base, PHP_URL_SCHEME) !== 'https' || $enrollment_token === '') {
+        return presspilot_agent_json_error('enrollment_input_invalid', 'A secure API URL and enrollment token are required.');
+    }
+
+    $response = wp_remote_post($api_base . '/v1/presspilot/enroll', [
+        'timeout' => 20,
+        'headers' => ['Accept' => 'application/json', 'Content-Type' => 'application/json'],
+        'body' => wp_json_encode([
+            'token' => $enrollment_token,
+            'site_url' => home_url('/'),
+            'agent_name' => 'presspilot-agent',
+            'agent_version' => PRESSPILOT_AGENT_VERSION,
+        ]),
+    ]);
+    if (is_wp_error($response)) {
+        return presspilot_agent_json_error('enrollment_request_failed', $response->get_error_message(), 502);
+    }
+    $status = wp_remote_retrieve_response_code($response);
+    $data = json_decode(wp_remote_retrieve_body($response), true);
+    if ($status < 200 || $status >= 300 || !is_array($data) || empty($data['agent_token']) || empty($data['connection']['id'])) {
+        $message = is_array($data) && !empty($data['error']) ? (string) $data['error'] : 'PressPilot enrollment was rejected.';
+        return presspilot_agent_json_error('enrollment_rejected', $message, 400);
+    }
+
+    update_option(PRESSPILOT_AGENT_TOKEN_HASH, presspilot_agent_hash_token((string) $data['agent_token']), false);
+    update_option(PRESSPILOT_AGENT_CONNECTION_ID, sanitize_text_field((string) $data['connection']['id']), false);
+    update_option(PRESSPILOT_AGENT_API_BASE, trailingslashit($api_base), false);
+    update_option(PRESSPILOT_AGENT_PAIRED_AT, current_time('mysql', true), false);
+
+    return [
+        'enrolled' => true,
+        'connection_id' => get_option(PRESSPILOT_AGENT_CONNECTION_ID, ''),
+        'agent_version' => PRESSPILOT_AGENT_VERSION,
+    ];
+}
+
+function presspilot_agent_enroll(WP_REST_Request $request) {
+    $token = trim((string) $request->get_param('token'));
+    $api_base = trim((string) $request->get_param('api_base_url'));
+    if ($token === '' || $api_base === '') {
+        return presspilot_agent_json_error('enrollment_input_required', 'token and api_base_url are required.');
+    }
+    return presspilot_agent_enroll_with_token($api_base, $token);
+}
+
+function presspilot_agent_rotate_token(WP_REST_Request $request) {
+    if (!presspilot_agent_authorized()) {
+        return presspilot_agent_json_error('unauthorized', 'Invalid PressPilot agent token.', 401);
+    }
+    $new_token = trim((string) $request->get_param('new_token'));
+    if ($new_token === '' || strlen($new_token) < 40 || strlen($new_token) > 256) {
+        return presspilot_agent_json_error('invalid_new_agent_token', 'new_token must be between 40 and 256 characters.');
+    }
+    update_option(PRESSPILOT_AGENT_TOKEN_HASH, presspilot_agent_hash_token($new_token), false);
+    return new WP_REST_Response(['rotated' => true], 200);
+}
+
+function presspilot_agent_revoke_token(WP_REST_Request $request) {
+    if (!presspilot_agent_authorized()) {
+        return presspilot_agent_json_error('unauthorized', 'Invalid PressPilot agent token.', 401);
+    }
+    delete_option(PRESSPILOT_AGENT_TOKEN_HASH);
+    delete_option(PRESSPILOT_AGENT_CONNECTION_ID);
+    delete_option(PRESSPILOT_AGENT_API_BASE);
+    delete_option(PRESSPILOT_AGENT_PAIRED_AT);
+    return new WP_REST_Response(['revoked' => true], 200);
+}
+
 function presspilot_agent_execute(WP_REST_Request $request) {
-    $token = presspilot_agent_bearer_token();
-    $stored = (string) get_option(PRESSPILOT_AGENT_TOKEN_HASH, '');
-    if ($token === '' || $stored === '' || !hash_equals($stored, presspilot_agent_hash_token($token))) {
+    if (!presspilot_agent_authorized()) {
         return presspilot_agent_json_error('unauthorized', 'Invalid PressPilot agent token.', 401);
     }    $operation = sanitize_key((string) $request->get_param('operation'));
     $args = $request->get_param('args');
