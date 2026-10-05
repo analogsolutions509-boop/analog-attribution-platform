@@ -54,7 +54,10 @@ const envSchema = z.object({
   ANALOG_OS_WEBHOOK_URL: z.string().url().optional(),
   ANALOG_OS_PULL_URL: z.string().url().optional(),
   ANALOG_OS_WEBHOOK_SECRET: z.string().optional(),
-  PRESSPILOT_MCP_TOKEN: z.string().min(32).optional()
+  PRESSPILOT_MCP_TOKEN: z.string().min(32).optional(),
+  PRESSPILOT_MAINWP_SECRET: z.string().min(32).optional(),
+  PRESSPILOT_OAUTH_AUDIENCE: z.string().url().optional(),
+  PRESSPILOT_OAUTH_SCOPES: z.string().default("presspilot:read,presspilot:write")
 });
 
 export const config = envSchema.parse(process.env);

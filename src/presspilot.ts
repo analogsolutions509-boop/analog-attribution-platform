@@ -1,6 +1,6 @@
 import { config } from "./config.js";
 import { db } from "./db.js";
-import { decryptSecret, encryptSecret, generateAgentToken, generatePairingCode, hashAgentToken, hashPairingCode, isPairingCodeFormatValid, normalizeWordPressUrl } from "./presspilot-core.js";
+import { decryptSecret, encryptSecret, generateAgentToken, generatePairingCode, generateEnrollmentToken, hashAgentToken, hashPairingCode, hashEnrollmentToken, isPairingCodeFormatValid, normalizeWordPressUrl } from "./presspilot-core.js";
 
 type FetchLike = typeof fetch;
 
@@ -258,21 +258,25 @@ export class PressPilotAgentClient {
     private readonly fetcher: FetchLike = globalThis.fetch
   ) {}
 
-  private async call<T>(operation: string, args: Record<string, unknown> = {}): Promise<T> {
-    const response = await this.fetcher(this.endpoint, {
+  private async request<T>(url: string, body: unknown): Promise<T> {
+    const response = await this.fetcher(url, {
       method: "POST",
       headers: {
         Authorization: "Bearer " + this.token,
         Accept: "application/json",
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ operation, args })
+      body: JSON.stringify(body)
     });
     const text = await response.text();
     if (!response.ok) throw new Error("presspilot_agent_" + response.status + ":" + text.slice(0, 240));
-    const body = text ? JSON.parse(text) as { result?: T; error?: string } : {};
-    if (body.error) throw new Error("presspilot_agent:" + body.error);
-    return body.result as T;
+    const parsed = text ? JSON.parse(text) as { result?: T; error?: string; rotated?: boolean; revoked?: boolean } : {};
+    if (parsed.error) throw new Error("presspilot_agent:" + parsed.error);
+    return parsed.result !== undefined ? parsed.result as T : parsed as T;
+  }
+
+  private async call<T>(operation: string, args: Record<string, unknown> = {}): Promise<T> {
+    return this.request<T>(this.endpoint, { operation, args });
   }
 
   async verify() { return this.call<Record<string, unknown>>("get_site"); }
@@ -294,6 +298,13 @@ async createPost(args: Record<string, unknown>) {
   }
   async updatePage(args: Record<string, unknown>) {
     return this.call<Record<string, unknown>>("update_page", args);
+  }
+  async rotateToken(newToken: string) {
+    if (!newToken.trim()) throw new Error("new_agent_token_required");
+    return this.request<Record<string, unknown>>(this.endpoint.replace(/\/agent$/, "/rotate"), { new_token: newToken });
+  }
+  async revokeToken() {
+    return this.request<Record<string, unknown>>(this.endpoint.replace(/\/agent$/, "/revoke"), {});
   }
   async getPost(id: number) {
     return this.call<Record<string, unknown>>("get_post", { id });
@@ -376,4 +387,137 @@ export async function getPressPilotExecutor(connectionId: string) {
     return new PressPilotAgentClient(connection.agent_endpoint, connection.agentToken);
   }
   return createWordPressClient(connection);
+}
+
+
+export async function rotatePressPilotAgentToken(id: string): Promise<PressPilotConnection> {
+  const stored = await getPressPilotConnection(id);
+  if (!stored) throw new Error("presspilot_connection_not_found");
+  if (stored.connection_mode !== "agent" || !stored.agent_endpoint || !stored.agentToken) {
+    throw new Error("presspilot_agent_not_paired");
+  }
+
+  const nextToken = generateAgentToken();
+  const tokenHash = hashAgentToken(nextToken, config.ANALOG_SITE_KEY_SECRET);
+  const encryptedAgentToken = encryptSecret(nextToken, config.ANALOG_SITE_KEY_SECRET);
+  let remoteRotated = false;
+
+  await db.query("BEGIN");
+  try {
+    await db.query(
+      "UPDATE presspilot_connections SET encrypted_agent_token=$2,agent_token_hash=$3,status='pending',last_error=NULL,updated_at=NOW() WHERE id=$1",
+      [id, encryptedAgentToken, tokenHash]
+    );
+
+    const client = new PressPilotAgentClient(stored.agent_endpoint, stored.agentToken);
+    await client.rotateToken(nextToken);
+    remoteRotated = true;
+
+    await db.query(
+      "UPDATE presspilot_connections SET status='verified',last_verified_at=NOW(),agent_last_seen_at=NOW(),last_error=NULL,updated_at=NOW() WHERE id=$1",
+      [id]
+    );
+    await db.query("COMMIT");
+  } catch (error) {
+    await db.query("ROLLBACK");
+    if (remoteRotated) {
+      try {
+        const rollbackClient = new PressPilotAgentClient(stored.agent_endpoint, nextToken);
+        await rollbackClient.rotateToken(stored.agentToken);
+      } catch {}
+    }
+    throw error;
+  }
+
+  const refreshed = await getPressPilotConnection(id);
+  if (!refreshed) throw new Error("presspilot_connection_not_found");
+  return refreshed;
+}
+
+export async function revokePressPilotAgentToken(id: string): Promise<PressPilotConnection> {
+  const stored = await getPressPilotConnection(id);
+  if (!stored) throw new Error("presspilot_connection_not_found");
+  if (stored.connection_mode !== "agent" || !stored.agent_endpoint || !stored.agentToken) {
+    throw new Error("presspilot_agent_not_paired");
+  }
+
+  await db.query("BEGIN");
+  try {
+    await db.query(
+      "UPDATE presspilot_connections SET status='disabled',encrypted_agent_token=NULL,agent_token_hash=NULL,last_error=NULL,updated_at=NOW() WHERE id=$1",
+      [id]
+    );
+    const client = new PressPilotAgentClient(stored.agent_endpoint, stored.agentToken);
+    await client.revokeToken();
+    await db.query("COMMIT");
+  } catch (error) {
+    await db.query("ROLLBACK");
+    throw error;
+  }
+
+  const refreshed = await db.query(
+    "SELECT id,site_id,base_url,wp_username,status,capabilities,last_verified_at,last_error,created_by,created_at,connection_mode,agent_endpoint,agent_version,agent_last_seen_at FROM presspilot_connections WHERE id=$1",
+    [id]
+  );
+  if (!refreshed.rows[0]) throw new Error("presspilot_connection_not_found");
+  return refreshed.rows[0] as PressPilotConnection;
+}
+
+export async function createPressPilotEnrollment(siteUrl: string, createdBy?: string | null) {
+  const baseUrl = normalizeWordPressUrl(siteUrl);
+  if (new URL(baseUrl).protocol !== "https:") throw new Error("https_required_for_agent");
+  const token = generateEnrollmentToken();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  const result = await db.query(
+    "INSERT INTO presspilot_enrollments(token_hash,site_url,created_by,expires_at) VALUES($1,$2,$3,$4) RETURNING id,site_url,expires_at,created_at",
+    [hashEnrollmentToken(token, config.ANALOG_SITE_KEY_SECRET), baseUrl, createdBy ?? null, expiresAt]
+  );
+  return { id: result.rows[0].id as string, site_url: result.rows[0].site_url as string, token, expires_at: result.rows[0].expires_at, created_at: result.rows[0].created_at };
+}
+
+export async function claimPressPilotEnrollment(input: {
+  token: string;
+  siteUrl: string;
+  agentName?: string;
+  agentVersion?: string;
+}) {
+  const token = input.token.trim();
+  const baseUrl = normalizeWordPressUrl(input.siteUrl);
+  if (new URL(baseUrl).protocol !== "https:") throw new Error("https_required_for_agent");
+  const agentToken = generateAgentToken();
+  const tokenHash = hashAgentToken(agentToken, config.ANALOG_SITE_KEY_SECRET);
+  const encryptedAgentToken = encryptSecret(agentToken, config.ANALOG_SITE_KEY_SECRET);
+  const endpoint = baseUrl + "/wp-json/presspilot/v1/agent";
+
+  await db.query("BEGIN");
+  try {
+    const enrollment = await db.query(
+      "SELECT id,site_url,created_by FROM presspilot_enrollments WHERE token_hash=$1 AND claimed_at IS NULL AND expires_at>NOW() FOR UPDATE",
+      [hashEnrollmentToken(token, config.ANALOG_SITE_KEY_SECRET)]
+    );
+    const row = enrollment.rows[0];
+    if (!row) throw new Error("enrollment_token_expired_or_invalid");
+    if (normalizeWordPressUrl(String(row.site_url)) !== baseUrl) throw new Error("enrollment_site_mismatch");
+
+    const existing = await db.query(
+      "SELECT id FROM presspilot_connections WHERE base_url=$1 AND connection_mode='agent' LIMIT 1",
+      [baseUrl]
+    );
+    const connection = existing.rows[0]?.id
+      ? await db.query(
+        "UPDATE presspilot_connections SET encrypted_agent_token=$2,agent_endpoint=$3,agent_token_hash=$4,agent_version=$5,status='verified',agent_last_seen_at=NOW(),last_verified_at=NOW(),last_error=NULL,updated_at=NOW() WHERE id=$1 RETURNING id,site_id,base_url,wp_username,status,capabilities,last_verified_at,last_error,created_by,created_at,connection_mode,agent_endpoint,agent_version,agent_last_seen_at",
+        [existing.rows[0].id, encryptedAgentToken, endpoint, tokenHash, input.agentVersion ?? null]
+      )
+      : await db.query(
+        "INSERT INTO presspilot_connections(base_url,wp_username,encrypted_app_password,encrypted_agent_token,status,capabilities,last_verified_at,last_error,created_by,connection_mode,agent_endpoint,agent_token_hash,agent_version,agent_last_seen_at) VALUES($1,'__presspilot_agent__',$2,$3,'verified',$4,NOW(),NULL,$5,'agent',$6,$7,$8,NOW()) RETURNING id,site_id,base_url,wp_username,status,capabilities,last_verified_at,last_error,created_by,created_at,connection_mode,agent_endpoint,agent_version,agent_last_seen_at",
+        [baseUrl, encryptSecret("", config.ANALOG_SITE_KEY_SECRET), encryptedAgentToken, JSON.stringify({ rest: false, agent: true, content: true }), row.created_by ?? null, endpoint, tokenHash, input.agentVersion ?? null]
+      );
+
+    await db.query("UPDATE presspilot_enrollments SET claimed_at=NOW(),connection_id=$2 WHERE id=$1", [row.id, connection.rows[0].id]);
+    await db.query("COMMIT");
+    return { connection: connection.rows[0], agent_token: agentToken, agent_name: input.agentName ?? null };
+  } catch (error) {
+    await db.query("ROLLBACK");
+    throw error;
+  }
 }

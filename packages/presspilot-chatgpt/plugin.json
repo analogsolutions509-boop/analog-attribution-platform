@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "presspilot",
+  "version": "0.2.1",
+  "description": "Secure AI command center for managing connected WordPress sites through controlled, auditable PressPilot tools.",
+  "author": {
+    "name": "Analog Solutions",
+    "email": "info@analogsolution.com",
+    "url": "https://analogsolution.com"
+  },
+  "homepage": "https://analogsolution.com",
+  "license": "Proprietary",
+  "keywords": ["wordpress", "website-management", "seo", "automation", "content"],
+  "extensions": {
+    "com.openai": {
+      "brandColor": "#35A7FF",
+      "logo": "./assets/presspilot-icon.png"
+    }
+  }
+}
