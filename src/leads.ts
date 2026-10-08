@@ -30,7 +30,7 @@ export async function createLead(input: LeadInput) {
   await queueAnalogOSEvent("lead.created", "lead", leadId, buildLeadOSEvent(
     {
       ...input,
-      customerPhone: normalizePhone(input.customerPhone)
+      customerPhone: normalizePhone(input.customerPhone) ?? undefined
     },
     leadId,
     supplierId,
