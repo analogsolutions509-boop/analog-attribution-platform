@@ -31,6 +31,7 @@ const envSchema = z.object({
   EVENT_MAX_BODY_BYTES: z.coerce.number().int().min(1024).max(1048576).default(65536),
   RECORDING_MAX_BYTES: z.coerce.number().int().min(1048576).max(104857600).default(26214400),
   CORS_ORIGINS: z.string().default("*"),
+  ANALOG_PUBLIC_COLLECTOR_HOSTS: z.string().default(""),
   PUBLIC_API_URL: z.string().url().optional(),
   TELEPHONY_PROVIDER: z.enum(["wazo","secondring","twilio"]).default("wazo"),
   TELEPHONY_INTERNAL_SECRET: z.string().min(16).optional(),

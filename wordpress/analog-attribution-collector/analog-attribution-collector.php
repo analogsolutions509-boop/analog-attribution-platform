@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Analog Attribution Collector
  * Description: First-party visitor/session/event collector for the Analog Attribution Platform.
- * Version: 0.2.0
+ * Version: 0.3.0
  * Author: Analog Solutions
  */
 
@@ -10,6 +10,7 @@ if (!defined('ABSPATH')) exit;
 
 final class Analog_Attribution_Collector {
   private const OPTION_KEY = 'analog_attribution_config';
+  private const DEFAULT_API_URL = 'https://api-jyu9-production.up.railway.app';
 
   public static function boot(): void {
     add_action('rest_api_init', [__CLASS__, 'register_routes']);
@@ -36,12 +37,35 @@ final class Analog_Attribution_Collector {
 
   private static function upstream(string $path, array $body): WP_REST_Response {
     $config = get_option(self::OPTION_KEY, []);
-    $api = isset($config['api_url']) ? esc_url_raw($config['api_url']) : '';
-    $site_key = isset($config['site_key']) ? (string) $config['site_key'] : '';
-    if (!$api || !$site_key) return new WP_REST_Response(['error' => 'collector_not_configured'], 503);
-    $response = wp_remote_post(trailingslashit($api) . ltrim($path, '/'), [
+    $api = isset($config['api_url']) ? esc_url_raw($config['api_url']) : self::DEFAULT_API_URL;
+    $site_key = isset($config['site_key']) ? trim((string) $config['site_key']) : '';
+    $hostname = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
+    if (!$api || !$hostname) return new WP_REST_Response(['error' => 'collector_not_configured'], 503);
+
+    if (!$site_key) {
+      $queryPath = str_replace([
+        'v1/events',
+        'v1/phone-pool/assign'
+      ], [
+        'v1/public/events?site=' . rawurlencode($hostname),
+        'v1/public/phone-pool/assign?site=' . rawurlencode($hostname)
+      ], ltrim($path, '/'));
+      $endpoint = trailingslashit($api) . $queryPath;
+      $headers = [
+        'Content-Type' => 'application/json',
+        'Origin' => 'https://' . $hostname
+      ];
+    } else {
+      $endpoint = trailingslashit($api) . ltrim($path, '/');
+      $headers = [
+        'Content-Type' => 'application/json',
+        'X-Analog-Site-Key' => $site_key
+      ];
+    }
+
+    $response = wp_remote_post($endpoint, [
       'timeout' => 5,
-      'headers' => ['Content-Type' => 'application/json', 'X-Analog-Site-Key' => $site_key],
+      'headers' => $headers,
       'body' => wp_json_encode($body),
     ]);
     if (is_wp_error($response)) return new WP_REST_Response(['error' => 'upstream_unavailable'], 502);
@@ -65,12 +89,12 @@ final class Analog_Attribution_Collector {
   public static function enqueue(): void {
     if (is_admin()) return;
     $config = get_option(self::OPTION_KEY, []);
-    if (empty($config['enabled'])) return;
+    if (array_key_exists('enabled', $config) && !$config['enabled']) return;
     wp_enqueue_script(
       'analog-attribution-collector',
       plugins_url('assets/collector.js', __FILE__),
       [],
-      '0.2.0',
+      '0.3.0',
       true
     );
     wp_localize_script('analog-attribution-collector', 'AnalogCollectorConfig', [
@@ -78,6 +102,7 @@ final class Analog_Attribution_Collector {
       'phoneEndpoint' => esc_url_raw(rest_url('analog/v1/phone')),
       'site' => home_url('/'),
       'debug' => !empty($config['debug']),
+      'mode' => empty($config['site_key']) ? 'first_party' : 'site_key',
     ]);
   }
 

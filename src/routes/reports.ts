@@ -63,7 +63,7 @@ export async function registerReportRoutes(app:FastifyInstance){
     const end=q.end??new Date().toISOString();
     const report=await buildReport({...q,start,end});
     return reply.type("application/pdf")
-      .header("content-disposition",'attachment; filename="analog-super-whatconverts-report.pdf"')
+      .header("content-disposition",'attachment; filename="analog-attribution-report.pdf"')
       .send(await generateReportPdf(report,start,end));
   });
 }

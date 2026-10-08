@@ -5,7 +5,7 @@ export function generateReportPdf(report:any,start:string,end:string){
   const chunks:Buffer[]=[];
   doc.on("data",(chunk:Buffer)=>chunks.push(chunk));
   doc.fillColor("#111827").fontSize(20).text("ANALOG SOLUTIONS");
-  doc.fontSize(12).text("Super-WhatConverts Performance Report");
+  doc.fontSize(12).text("Analog Attribution Performance Report");
   doc.fontSize(10).text("Period: "+start+" to "+end);
   const cards=[["Leads",report.kpi.leads],["Contacted",report.kpi.touched],["Sales",report.kpi.sales]];
   let y=145;

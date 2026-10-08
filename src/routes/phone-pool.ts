@@ -4,6 +4,7 @@ import { db } from "../db.js";
 import { resolveSite } from "../auth.js";
 import { assignTrackingNumber } from "../number-pool.js";
 import { requireDashboard } from "./dashboard.js";
+import { isAllowedCollectorOrigin, resolvePublicCollectorSite } from "../public-collector.js";
 
 export async function registerPhonePoolRoutes(app: FastifyInstance) {
   app.get("/v1/dashboard/forwarding-numbers", async (request, reply) => {
@@ -243,6 +244,24 @@ export async function registerPhonePoolRoutes(app: FastifyInstance) {
     const result = await db.query("DELETE FROM tracking_numbers WHERE id=$1 RETURNING id,site_id,phone_number", [request.params.numberId]);
     if (!result.rowCount) return reply.code(404).send({ error: "tracking_number_not_found" });
     return reply.send({ ok: true, tracking_number: result.rows[0] });
+  });
+
+  app.post("/v1/public/phone-pool/assign", async (request, reply) => {
+    const hostname = typeof (request.query as { site?: unknown }).site === "string"
+      ? String((request.query as { site?: string }).site).trim()
+      : "";
+    const site = await resolvePublicCollectorSite(hostname);
+    if (!site) return reply.code(403).send({ error: "collector_site_not_allowed" });
+    if (!isAllowedCollectorOrigin(request.headers.origin as string | undefined, site.hostname)) {
+      return reply.code(403).send({ error: "collector_origin_not_allowed" });
+    }
+    const body = request.body as Record<string, unknown>;
+    if (typeof body.visitor_id !== "string" || typeof body.session_id !== "string") {
+      return reply.code(400).send({ error: "visitor_id_and_session_id_required" });
+    }
+    const assigned = await assignTrackingNumber(site.id, body.visitor_id, body.session_id);
+    if (!assigned) return reply.code(409).send({ error: "number_pool_exhausted" });
+    return reply.send({ ok: true, phone_number: assigned.phoneNumber, expires_at: assigned.expiresAt });
   });
 
   app.post("/v1/phone-pool/assign", async (request, reply) => {
