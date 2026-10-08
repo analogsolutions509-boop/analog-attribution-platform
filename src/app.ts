@@ -73,7 +73,9 @@ export function buildApp() {
   app.register(registerCallRoutes);
   app.register(registerSecondRingRoutes);
   app.register(registerTwilioRoutes);
-  app.register(registerWhatConvertsRoutes);
+  if (config.ENABLE_WHATCONVERTS) {
+    app.register(registerWhatConvertsRoutes);
+  }
   app.register(registerTelephonyRoutes);
   app.register(registerLeadRoutes);
   app.register(registerSupplierRoutes);
