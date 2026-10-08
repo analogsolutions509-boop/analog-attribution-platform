@@ -3,6 +3,7 @@ import { routeLead } from "./routing.js";
 import { normalizePhone } from "./utils/phone.js";
 import { attributeNumberToCall } from "./number-pool.js";
 import { queueAnalogOSEvent } from "./analog-os-outbox.js";
+import { buildLeadOSEvent } from "./lead-event.js";
 
 export type LeadInput = {
   siteId: string; visitorId?: string; sessionId?: string; source?: string;
@@ -21,19 +22,20 @@ export async function createLead(input: LeadInput) {
   );
   const leadId = result.rows[0].id as string;
   const supplierId = await routeLead(leadId,input.siteId,input.serviceType);
-  await queueAnalogOSEvent("lead.created", "lead", leadId, {
-    lead_id: leadId,
-    site_id: input.siteId,
-    supplier_id: supplierId,
-    source: input.source ?? "unknown",
-    customer_name: input.customerName ?? null,
-    company_name: input.companyName ?? null,
-    customer_phone: normalizePhone(input.customerPhone),
-    customer_email: input.customerEmail ?? null,
-    service_type: input.serviceType ?? null,
-    requirements: input.requirements ?? {},
-    summary: input.summary ?? null
-  });
+  const siteResult = await db.query(
+    "SELECT name,hostname FROM sites WHERE id=$1 LIMIT 1",
+    [input.siteId]
+  );
+  const site = siteResult.rows[0] ?? {};
+  await queueAnalogOSEvent("lead.created", "lead", leadId, buildLeadOSEvent(
+    {
+      ...input,
+      customerPhone: normalizePhone(input.customerPhone)
+    },
+    leadId,
+    supplierId,
+    site
+  ));
   return leadId;
 }
 
