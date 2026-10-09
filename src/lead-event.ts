@@ -1,6 +1,8 @@
 export type LeadEventSite = {
   name?: string | null;
   hostname?: string | null;
+  supplierName?: string | null;
+  supplierEmail?: string | null;
 };
 
 export type LeadEventInput = {
@@ -38,6 +40,8 @@ export function buildLeadOSEvent(
     site_name: site.name ?? null,
     hostname: canonicalHostname(site.hostname),
     supplier_id: supplierId,
+    supplier_name: site.supplierName ?? null,
+    supplier_email: site.supplierEmail ?? null,
     source: input.source ?? "unknown",
     customer_name: input.customerName ?? null,
     company_name: input.companyName ?? null,

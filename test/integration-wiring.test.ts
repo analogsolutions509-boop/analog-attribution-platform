@@ -27,3 +27,10 @@ test("daily Analog OS reconciliation is wired into the worker and dashboard", as
   assert.ok(migration.includes("analog_os_reconciliation_runs"));
   assert.ok(migration.includes("analog_os_recovery_records"));
 });
+
+test("first-party form leads queue both internal and supplier email notifications", async () => {
+  const worker = await readFile(new URL("../src/worker.ts", import.meta.url), "utf8");
+  assert.ok(worker.includes("const leadId = await createLead({"));
+  assert.ok(worker.includes('queueNotification({leadId,recipientType:"internal",channel:"email"})'));
+  assert.ok(worker.includes('queueNotification({leadId,recipientType:"supplier",channel:"email"})'));
+});

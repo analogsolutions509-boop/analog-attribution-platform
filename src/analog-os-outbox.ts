@@ -1,6 +1,7 @@
 import { db } from "./db.js";
 import { createJob } from "./jobs.js";
 import { buildAnalogOSEvent } from "./analog-os-events.js";
+import { shouldRecoverAnalogOSEvent } from "./analog-os-recovery-policy.js";
 
 export async function queueAnalogOSEvent(
   eventType: string,
@@ -37,17 +38,46 @@ export async function markAnalogOSEventAttempt(id: string, error: string): Promi
 
 export async function recoverAnalogOSEvents(limit = 25): Promise<number> {
   const result = await db.query(
-    `SELECT o.id FROM analog_os_outbox o
+    `SELECT o.id,o.status AS outbox_status,
+            j.status AS job_status,j.attempts,j.max_attempts,
+            j.available_at,j.updated_at AS job_updated_at
+     FROM analog_os_outbox o
+     LEFT JOIN jobs j ON j.dedupe_key='analog.os.sync:' || o.id::text
      WHERE o.status='queued'
-       AND NOT EXISTS (
-         SELECT 1 FROM jobs j
-         WHERE j.dedupe_key='analog.os.sync:' || o.id::text
+       AND (
+         j.id IS NULL
+         OR j.status='completed'
+         OR (j.status='failed' AND j.attempts<j.max_attempts AND COALESCE(j.available_at,NOW())<=NOW())
+         OR (
+           (j.status='dead_letter' OR (j.status='failed' AND j.attempts>=j.max_attempts))
+           AND j.updated_at<=NOW()-INTERVAL '1 hour'
+         )
        )
-     ORDER BY o.created_at ASC LIMIT $1`,
+     ORDER BY o.created_at ASC
+     LIMIT $1`,
     [limit]
   );
+
+  let recovered = 0;
   for (const row of result.rows) {
-    await createJob("analog.os.sync", "analog_os_event", row.id);
+    const job = row.job_status ? {
+      status: String(row.job_status),
+      attempts: row.attempts,
+      maxAttempts: row.max_attempts,
+      availableAt: row.available_at,
+      updatedAt: row.job_updated_at
+    } : null;
+
+    if (!shouldRecoverAnalogOSEvent(String(row.outbox_status), job)) continue;
+
+    const attempts = Number(row.attempts ?? 0);
+    const maxAttempts = Number(row.max_attempts ?? 0);
+    const forceRequeue = row.job_status === "completed"
+      || row.job_status === "dead_letter"
+      || (row.job_status === "failed" && attempts >= maxAttempts);
+
+    await createJob("analog.os.sync", "analog_os_event", row.id, {}, { forceRequeue });
+    recovered++;
   }
-  return result.rowCount ?? 0;
+  return recovered;
 }

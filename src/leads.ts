@@ -35,8 +35,11 @@ export async function createLead(input: LeadInput) {
       );
       if (!outbox.rowCount) {
         const siteResult = await db.query(
-          "SELECT name,hostname FROM sites WHERE id=$1 LIMIT 1",
-          [input.siteId]
+          `SELECT s.name,s.hostname,
+                  sp.name AS "supplierName",sp.notification_email AS "supplierEmail"
+           FROM sites s LEFT JOIN suppliers sp ON sp.id=$2
+           WHERE s.id=$1 LIMIT 1`,
+          [input.siteId,supplierId]
         );
         await queueAnalogOSEvent("lead.created","lead",leadId,buildLeadOSEvent({
           siteId:input.siteId,
@@ -64,8 +67,11 @@ export async function createLead(input: LeadInput) {
   const leadId = result.rows[0].id as string;
   const supplierId = await routeLead(leadId,input.siteId,input.serviceType);
   const siteResult = await db.query(
-    "SELECT name,hostname FROM sites WHERE id=$1 LIMIT 1",
-    [input.siteId]
+    `SELECT s.name,s.hostname,
+            sp.name AS "supplierName",sp.notification_email AS "supplierEmail"
+     FROM sites s LEFT JOIN suppliers sp ON sp.id=$2
+     WHERE s.id=$1 LIMIT 1`,
+    [input.siteId,supplierId]
   );
   const site = siteResult.rows[0] ?? {};
   await queueAnalogOSEvent("lead.created", "lead", leadId, buildLeadOSEvent(

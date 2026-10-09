@@ -10,7 +10,7 @@ import { markAnalogOSEventAttempt, markAnalogOSEventSent, recoverAnalogOSEvents 
 import { config } from "./config.js";
 import { createLead } from "./leads.js";
 import { normalizeCollectorEventLead } from "./collector-event-lead.js";
-import { deliverNotification } from "./notifications.js";
+import { deliverNotification, queueNotification } from "./notifications.js";
 import {
   ensureDailyAnalogOSReconciliationJob,
   reconcileAnalogOSDate
@@ -99,8 +99,8 @@ async function processEvent(eventId: string) {
   const lead = normalizeCollectorEventLead(payload);
   if (!lead) return event;
 
-  // createLead is idempotent for collector event keys and also repairs a missing OS outbox event.
-  await createLead({
+  // Lead creation and notification queueing are idempotent across worker retries.
+  const leadId = await createLead({
     siteId: event.site_id,
     visitorId: event.visitor_id,
     sessionId: event.session_id,
@@ -123,6 +123,11 @@ async function processEvent(eventId: string) {
       capture_path: "worker_repairable_event"
     }
   });
+
+  await Promise.all([
+    queueNotification({leadId,recipientType:"internal",channel:"email"}),
+    queueNotification({leadId,recipientType:"supplier",channel:"email"})
+  ]);
 
   return event;
 }

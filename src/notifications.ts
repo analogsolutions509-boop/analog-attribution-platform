@@ -13,10 +13,30 @@ type NotificationRequest = {
 };
 
 export async function queueNotification(input:NotificationRequest) {
-  if (input.callId) {
-    const existing = await db.query("SELECT id FROM notifications WHERE call_id=$1 AND recipient_type=$2 AND channel=$3 LIMIT 1",[input.callId,input.recipientType,input.channel]);
-    if (existing.rowCount) return existing.rows[0].id as string;
+  const existing = await db.query(
+    `SELECT id,status FROM notifications
+     WHERE lead_id=$1 AND recipient_type=$2 AND channel=$3
+       AND call_id IS NOT DISTINCT FROM $4
+     ORDER BY created_at DESC LIMIT 1`,
+    [input.leadId,input.recipientType,input.channel,input.callId ?? null]
+  );
+  if (existing.rowCount) {
+    const notificationId = existing.rows[0].id as string;
+    const status = String(existing.rows[0].status || "").toLowerCase();
+    if (status === "sent") return notificationId;
+
+    if (status === "skipped") {
+      await db.query(
+        "UPDATE notifications SET status='pending',last_error=NULL,updated_at=NOW() WHERE id=$1",
+        [notificationId]
+      );
+      await createJob("notification.send","notification",notificationId,{}, {forceRequeue:true});
+    } else {
+      await createJob("notification.send","notification",notificationId,{});
+    }
+    return notificationId;
   }
+
   const lead=await db.query(`SELECT l.*,s.name AS site_name,s.hostname,
     s.supplier_id AS site_supplier_id,
     sp.name AS supplier_name,sp.notification_email,sp.notification_sms

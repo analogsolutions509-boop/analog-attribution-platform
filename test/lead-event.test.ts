@@ -16,7 +16,12 @@ test("lead OS event includes canonical site identity and lead data", () => {
     },
     "lead-1",
     "supplier-1",
-    { name: "Rebar Birmingham", hostname: "rebarbirmingham.co.uk" }
+    {
+      name: "Rebar Birmingham",
+      hostname: "rebarbirmingham.co.uk",
+      supplierName: "Chorley's Concrete",
+      supplierEmail: "orders@example.invalid"
+    }
   );
 
   assert.equal(event.lead_id, "lead-1");
@@ -24,6 +29,8 @@ test("lead OS event includes canonical site identity and lead data", () => {
   assert.equal(event.site_name, "Rebar Birmingham");
   assert.equal(event.hostname, "rebarbirmingham.co.uk");
   assert.equal(event.supplier_id, "supplier-1");
+  assert.equal(event.supplier_name, "Chorley's Concrete");
+  assert.equal(event.supplier_email, "orders@example.invalid");
   assert.equal(event.customer_name, "Test Customer");
   assert.equal(event.service_type, "ready mix concrete");
 });
