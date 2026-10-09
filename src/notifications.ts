@@ -4,6 +4,7 @@ import { createJob } from "./jobs.js";
 import { createOutcomeToken } from "./outcomes.js";
 import { createRecordingDownloadUrl } from "./storage/r2.js";
 import { buildNotificationEnvelope } from "./notification-envelope.js";
+import { resolveNotificationWebhook } from "./notification-routing.js";
 
 type NotificationRequest = {
   leadId:string;
@@ -118,7 +119,13 @@ export async function deliverNotification(notificationId:string) {
     return;
   }
 
-  if(!config.ANALOG_NOTIFICATIONS_WEBHOOK_URL) {
+  const delivery = resolveNotificationWebhook({
+    notificationUrl: config.ANALOG_NOTIFICATIONS_WEBHOOK_URL,
+    notificationSecret: config.ANALOG_NOTIFICATIONS_WEBHOOK_SECRET,
+    analogOSUrl: config.ANALOG_OS_WEBHOOK_URL,
+    analogOSSecret: config.ANALOG_OS_WEBHOOK_SECRET
+  });
+  if (!delivery) {
     await skip("webhook_not_configured");
     return;
   }
@@ -133,9 +140,8 @@ export async function deliverNotification(notificationId:string) {
     return;
   }
 
-  const signingSecret = config.ANALOG_NOTIFICATIONS_WEBHOOK_SECRET || config.ANALOG_OS_WEBHOOK_SECRET || "";
-  const envelope = buildNotificationEnvelope(payload, signingSecret);
-  const response=await fetch(config.ANALOG_NOTIFICATIONS_WEBHOOK_URL,{
+  const envelope = buildNotificationEnvelope(payload, delivery.signingSecret);
+  const response=await fetch(delivery.url,{
     method:"POST",
     headers:{"content-type":"application/json"},
     body:JSON.stringify(envelope)
