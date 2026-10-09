@@ -3,6 +3,7 @@ import { db } from "./db.js";
 import { createJob } from "./jobs.js";
 import { createOutcomeToken } from "./outcomes.js";
 import { createRecordingDownloadUrl } from "./storage/r2.js";
+import { buildNotificationEnvelope } from "./notification-envelope.js";
 
 type NotificationRequest = {
   leadId:string;
@@ -57,7 +58,7 @@ export async function queueNotification(input:NotificationRequest) {
     caller_email:input.recipientType==="internal" ? row.customer_email ?? null : null,
     supplier:input.recipientType==="supplier" ? row.supplier_name ?? null : null,
     summary:call?.summary ?? row.summary ?? null,
-    transcript:call?.full_text ?? null,
+    transcript:input.recipientType === "internal" ? call?.full_text ?? null : null,
     duration_seconds:call?.duration_seconds ?? null,
     recording_url:recordingUrl,
     outcome_links:outcomes,
@@ -65,8 +66,11 @@ export async function queueNotification(input:NotificationRequest) {
   };
   const result=await db.query(`INSERT INTO notifications(call_id,lead_id,recipient_type,channel,payload)
     VALUES($1,$2,$3,$4,$5) RETURNING id`,[input.callId ?? null,input.leadId,input.recipientType,input.channel,payload]);
-  await createJob("notification.send","notification",result.rows[0].id,{});
-  return result.rows[0].id as string;
+  const notificationId = result.rows[0].id as string;
+  const storedPayload = { ...payload, notification_id: notificationId };
+  await db.query("UPDATE notifications SET payload=$2,updated_at=NOW() WHERE id=$1",[notificationId,storedPayload]);
+  await createJob("notification.send","notification",notificationId,{});
+  return notificationId;
 }
 
 export async function deliverNotification(notificationId:string) {
@@ -74,16 +78,61 @@ export async function deliverNotification(notificationId:string) {
   if(!result.rowCount) throw new Error("notification_not_found");
   const row=result.rows[0];
   if(row.status==="sent") return;
-  if(!config.ANALOG_NOTIFICATIONS_WEBHOOK_URL) {
-    await db.query("UPDATE notifications SET status='skipped',last_error='webhook_not_configured',updated_at=NOW() WHERE id=$1",[notificationId]);
+
+  const payload = { ...(row.payload as Record<string, unknown>) };
+  const channel = String(payload.channel ?? "");
+  const recipientType = String(payload.recipient_type ?? "");
+  const skip = async (reason: string) => {
+    await db.query(
+      "UPDATE notifications SET status='skipped',last_error=$2,updated_at=NOW() WHERE id=$1",
+      [notificationId, reason]
+    );
+  };
+
+  if(channel === "sms") {
+    await skip("sms_provider_not_configured");
     return;
   }
-  const body=JSON.stringify(row.payload);
+  if(channel !== "email") {
+    await skip("unsupported_notification_channel");
+    return;
+  }
+
+  if(!config.ANALOG_NOTIFICATIONS_WEBHOOK_URL) {
+    await skip("webhook_not_configured");
+    return;
+  }
+
+  let target = String(payload.target ?? "").trim();
+  if(!target && recipientType === "internal") {
+    target = config.ANALOG_INTERNAL_NOTIFICATION_EMAIL || "info@analogsolution.com";
+    payload.target = target;
+  }
+  if(!target) {
+    await skip("notification_recipient_missing");
+    return;
+  }
+
+  const signingSecret = config.ANALOG_NOTIFICATIONS_WEBHOOK_SECRET || config.ANALOG_OS_WEBHOOK_SECRET || "";
+  const envelope = buildNotificationEnvelope(payload, signingSecret);
   const response=await fetch(config.ANALOG_NOTIFICATIONS_WEBHOOK_URL,{
     method:"POST",
-    headers:{"content-type":"application/json","x-analog-notification-secret":config.ANALOG_NOTIFICATIONS_WEBHOOK_SECRET ?? ""},
-    body
+    headers:{"content-type":"application/json"},
+    body:JSON.stringify(envelope)
   });
+  const responseBody = await response.json().catch(() => null) as { ok?: boolean; error?: string; duplicate?: boolean } | null;
   if(!response.ok) throw new Error(`notification_webhook_${response.status}`);
-  await db.query("UPDATE notifications SET status='sent',sent_at=NOW(),updated_at=NOW() WHERE id=$1",[notificationId]);
+  if(responseBody?.ok !== true) {
+    const reason = String(responseBody?.error ?? "notification_webhook_rejected");
+    if(reason === "recipient_missing" || reason === "unsupported_channel" || reason === "supplier_email_missing") {
+      await skip(reason);
+      return;
+    }
+    throw new Error(reason);
+  }
+
+  await db.query(
+    "UPDATE notifications SET payload=$2,status='sent',sent_at=NOW(),last_error=NULL,updated_at=NOW() WHERE id=$1",
+    [notificationId,payload]
+  );
 }
