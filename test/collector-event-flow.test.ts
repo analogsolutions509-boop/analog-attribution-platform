@@ -6,14 +6,17 @@ import { normalizeCollectorEventLead } from "../src/collector-event-lead.ts";
 test("collector form events are queued and leads are materialized by the retryable worker", async () => {
   const eventsSource = await readFile(new URL("../src/events.ts", import.meta.url), "utf8");
   const workerSource = await readFile(new URL("../src/worker.ts", import.meta.url), "utf8");
+  const leadsSource = await readFile(new URL("../src/leads.ts", import.meta.url), "utf8");
 
   assert.match(eventsSource, /if \(eventId\) await enqueueEvent\(eventId\)/);
   assert.doesNotMatch(eventsSource, /await createLead\(/);
   assert.match(workerSource, /event\.event_name !== "form_submit" && event\.event_name !== "lead_submit"/);
   assert.match(workerSource, /normalizeCollectorEventLead\(payload\)/);
-  assert.match(workerSource, /source_detail->>'event_key'=\$2/);
   assert.match(workerSource, /recoverMissingCollectorLeadJobs/);
   assert.match(workerSource, /forceRequeue: true/);
+  assert.match(leadsSource, /source_detail->>'event_key'/);
+  assert.match(leadsSource, /aggregate_type='lead' AND aggregate_id=\$1 AND event_type='lead\.created'/);
+  assert.match(leadsSource, /if \(!outbox\.rowCount\)/);
 });
 
 test("the exact payload emitted by the collector can become a qualified lead input", () => {

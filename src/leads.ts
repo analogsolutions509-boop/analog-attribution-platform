@@ -13,6 +13,47 @@ export type LeadInput = {
 };
 
 export async function createLead(input: LeadInput) {
+  const eventKey = typeof input.sourceDetail?.event_key === "string"
+    ? input.sourceDetail.event_key.trim()
+    : "";
+
+  if (eventKey) {
+    const existing = await db.query(
+      `SELECT id,source,customer_name,company_name,customer_phone,customer_email,service_type,requirements,summary,routed_supplier_id
+       FROM leads
+       WHERE site_id=$1 AND source_detail->>'event_key'=$2
+       ORDER BY created_at ASC LIMIT 1`,
+      [input.siteId,eventKey]
+    );
+    if (existing.rowCount) {
+      const row = existing.rows[0];
+      const leadId = row.id as string;
+      const supplierId = row.routed_supplier_id || await routeLead(leadId,input.siteId,row.service_type || input.serviceType);
+      const outbox = await db.query(
+        "SELECT id FROM analog_os_outbox WHERE aggregate_type='lead' AND aggregate_id=$1 AND event_type='lead.created' LIMIT 1",
+        [leadId]
+      );
+      if (!outbox.rowCount) {
+        const siteResult = await db.query(
+          "SELECT name,hostname FROM sites WHERE id=$1 LIMIT 1",
+          [input.siteId]
+        );
+        await queueAnalogOSEvent("lead.created","lead",leadId,buildLeadOSEvent({
+          siteId:input.siteId,
+          source:row.source || input.source,
+          customerName:row.customer_name || input.customerName,
+          companyName:row.company_name || input.companyName,
+          customerPhone:normalizePhone(row.customer_phone || input.customerPhone) ?? undefined,
+          customerEmail:row.customer_email || input.customerEmail,
+          serviceType:row.service_type || input.serviceType,
+          requirements:row.requirements || input.requirements || {},
+          summary:row.summary || input.summary
+        },leadId,supplierId,siteResult.rows[0] ?? {}));
+      }
+      return leadId;
+    }
+  }
+
   const result = await db.query(
     `INSERT INTO leads(site_id,visitor_id,session_id,source,customer_name,company_name,customer_phone,customer_email,service_type,requirements,summary,source_detail)
      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
