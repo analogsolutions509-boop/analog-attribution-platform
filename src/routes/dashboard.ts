@@ -185,6 +185,40 @@ export function buildDashboardNumbersQuery(): string {
     `;
 }
 
+export function buildDashboardJobsByTypeQuery(): string {
+  return `
+    SELECT job_type,status,COUNT(*)::int AS count
+    FROM jobs
+    GROUP BY job_type,status
+    ORDER BY job_type,status
+  `;
+}
+
+export function buildDashboardDeadLetterSummaryQuery(): string {
+  return `
+    SELECT
+      job_type,
+      CASE
+        WHEN last_error IS NULL OR BTRIM(last_error)='' THEN 'no_error'
+        WHEN last_error LIKE 'analog_os_sync_failed:%' THEN 'analog_os_sync_failed'
+        WHEN last_error LIKE 'analog_os_sync_rejected:%' THEN 'analog_os_sync_rejected'
+        WHEN last_error LIKE 'notification_webhook_%' THEN 'notification_webhook_failed'
+        WHEN last_error LIKE '%recording_source_url_missing%' THEN 'recording_source_url_missing'
+        WHEN last_error LIKE '%call_not_found%' THEN 'call_not_found'
+        WHEN last_error LIKE '%event_not_found%' THEN 'event_not_found'
+        WHEN last_error LIKE '%invalid_signature%' THEN 'invalid_signature'
+        ELSE 'other'
+      END AS error_category,
+      COUNT(*)::int AS count,
+      MIN(updated_at) AS oldest_updated_at,
+      MAX(updated_at) AS latest_updated_at
+    FROM jobs
+    WHERE status='dead_letter'
+    GROUP BY job_type,error_category
+    ORDER BY count DESC,job_type
+  `;
+}
+
 export function buildLeadFlowQuery(): string {
   return `
     WITH v AS (
@@ -520,10 +554,17 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
 
   app.get("/v1/dashboard/system", async (request, reply) => {
     if (!(await requireDashboard(app, request, reply))) return;
-    const [jobs, outbox] = await Promise.all([
+    const [jobs, outbox, jobsByType, deadLetterSummary] = await Promise.all([
       db.query(`SELECT status,COUNT(*)::int AS count FROM jobs GROUP BY status ORDER BY status`),
-      db.query(`SELECT status,COUNT(*)::int AS count FROM analog_os_outbox GROUP BY status ORDER BY status`)
+      db.query(`SELECT status,COUNT(*)::int AS count FROM analog_os_outbox GROUP BY status ORDER BY status`),
+      db.query(buildDashboardJobsByTypeQuery()),
+      db.query(buildDashboardDeadLetterSummaryQuery())
     ]);
-    return reply.send({ jobs: jobs.rows, analog_os_outbox: outbox.rows });
+    return reply.send({
+      jobs: jobs.rows,
+      analog_os_outbox: outbox.rows,
+      jobs_by_type: jobsByType.rows,
+      dead_letter_summary: deadLetterSummary.rows
+    });
   });
 }
