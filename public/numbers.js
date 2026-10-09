@@ -74,10 +74,23 @@ async function deleteForwarding(id){
   try{await api("/v1/dashboard/forwarding-numbers/"+encodeURIComponent(id),{method:"DELETE"});toast("Forwarding number deleted.");await loadForwarding();fillForwardingSelect();}
   catch(err){toast(err.message||"Forwarding number could not be deleted.");}
 }
+function routeIssueLabel(issue){
+  const labels={
+    tracking_number_inactive:"Tracking number is paused",
+    forwarding_number_missing:"Forwarding number not linked",
+    forwarding_number_not_found:"Linked forwarding number is missing",
+    forwarding_number_inactive:"Forwarding number is paused",
+    destination_supplier_missing:"No destination supplier assigned",
+    destination_supplier_inactive:"Destination supplier is inactive or missing",
+    destination_supplier_not_assigned_to_site:"Supplier is not assigned to this website",
+    destination_contact_missing:"Supplier destination phone/endpoint is missing"
+  };
+  return labels[issue]||"Route needs configuration";
+}
 function renderManagedNumbers(){
   const rows=state.numbers||[];
   const active=rows.filter(n=>n.active).length;
-  const ready=rows.filter(n=>n.active&&n.forwarding_number&&n.destination_number).length;
+  const ready=rows.filter(n=>n.pool_ready===true).length;
   const activeForwarding=numberState.forwarding.filter(x=>x.active).length;
   q("#numbersMetrics").innerHTML=[
     ["Tracking numbers",rows.length,"Total inventory"],
@@ -88,12 +101,13 @@ function renderManagedNumbers(){
   if(!rows.length){q("#numbersTable").innerHTML='<div class="empty">No tracking numbers configured.</div>';return;}
   q("#numbersTable").innerHTML='<div class="table-wrap"><table><thead><tr><th>Tracking</th><th>Website</th><th>Forwarding</th><th>Destination</th><th>Route</th><th>Visitors</th><th>Actions</th></tr></thead><tbody>'+
     rows.map(n=>{
-      const ready=n.active&&n.forwarding_number&&n.destination_number;
+      const ready=n.pool_ready===true;
+      const routeStatus=ready?status("ready"):status("incomplete")+'<br><span class="muted">'+escN(routeIssueLabel(n.pool_issue))+'</span>';
       return '<tr><td><b>'+escN(n.phone_number)+'</b><br><span class="muted">'+escN(n.label||"")+'</span></td>'+
       '<td>'+escN(n.site_name)+'<br><span class="muted">'+escN(n.hostname)+'</span></td>'+
       '<td>'+escN(n.forwarding_number||"Not linked")+'</td>'+
-      '<td>'+escN(n.destination_number||"Not linked")+(n.destination_supplier_name?"<br><span class=\"muted\">"+escN(n.destination_supplier_name)+"</span>":"")+'</td>'+
-      '<td>'+status(ready?"ready":"incomplete")+'</td><td>'+n.active_assignments+'</td>'+
+      '<td>'+escN(n.destination_number||"No real destination")+(n.destination_supplier_name?"<br><span class=\"muted\">"+escN(n.destination_supplier_name)+"</span>":"")+'</td>'+
+      '<td>'+routeStatus+'</td><td>'+n.active_assignments+'</td>'+
       '<td><button class="btn" data-number-action="edit" data-number-id="'+escN(n.id)+'">Edit</button> '+
       '<button class="btn" data-number-action="toggle" data-number-id="'+escN(n.id)+'" data-active="'+(!n.active)+'">'+(n.active?"Deactivate":"Activate")+
       '</button> <button class="btn" data-number-action="delete" data-number-id="'+escN(n.id)+'">Delete</button></td></tr>';

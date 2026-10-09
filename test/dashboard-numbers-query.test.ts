@@ -1,8 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildDashboardNumbersQuery } from "../src/routes/dashboard.js";
 
-test("dashboard numbers query combines tracking numbers with website and ranked destinations", () => {
+test("dashboard numbers query combines tracking numbers with website and ranked destinations", async () => {
+  const [{ buildDashboardNumbersQuery }, { redis }] = await Promise.all([
+    import("../src/routes/dashboard.ts"),
+    import("../src/queue.ts")
+  ]);
+  redis.disconnect();
   const sql = buildDashboardNumbersQuery();
 
   assert.match(sql, /FROM tracking_numbers tn/);
