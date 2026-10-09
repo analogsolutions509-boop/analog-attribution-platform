@@ -99,12 +99,7 @@ async function processEvent(eventId: string) {
   const lead = normalizeCollectorEventLead(payload);
   if (!lead) return event;
 
-  const existing = await db.query(
-    "SELECT id FROM leads WHERE site_id=$1 AND source_detail->>'event_key'=$2 LIMIT 1",
-    [event.site_id, event.event_key]
-  );
-  if (existing.rowCount) return event;
-
+  // createLead is idempotent for collector event keys and also repairs a missing OS outbox event.
   await createLead({
     siteId: event.site_id,
     visitorId: event.visitor_id,
