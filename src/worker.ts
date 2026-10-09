@@ -8,6 +8,8 @@ import { transcribeBytes } from "./call-intelligence/transcribe.js";
 import { deliverAnalogOSEvent } from "./analog-os.js";
 import { markAnalogOSEventAttempt, markAnalogOSEventSent, recoverAnalogOSEvents } from "./analog-os-outbox.js";
 import { config } from "./config.js";
+import { createLead } from "./leads.js";
+import { normalizeCollectorEventLead } from "./collector-event-lead.js";
 import { deliverNotification } from "./notifications.js";
 import {
   ensureDailyAnalogOSReconciliationJob,
@@ -81,11 +83,53 @@ async function recoverJobs(): Promise<void> {
 
 async function processEvent(eventId: string) {
   const result = await db.query(
-    "SELECT id,event_name,payload FROM events WHERE id=$1",
+    "SELECT id,site_id,visitor_id,session_id,event_key,event_name,occurred_at,page_url,page_path,utm_source,utm_campaign,payload FROM events WHERE id=$1",
     [eventId]
   );
   if (!result.rowCount) throw new Error("event_not_found");
-  return result.rows[0];
+  const event = result.rows[0];
+
+  if (event.event_name !== "form_submit" && event.event_name !== "lead_submit") {
+    return event;
+  }
+
+  const payload = event.payload && typeof event.payload === "object"
+    ? event.payload as Record<string, unknown>
+    : {};
+  const lead = normalizeCollectorEventLead(payload);
+  if (!lead) return event;
+
+  const existing = await db.query(
+    "SELECT id FROM leads WHERE site_id=$1 AND source_detail->>'event_key'=$2 LIMIT 1",
+    [event.site_id, event.event_key]
+  );
+  if (existing.rowCount) return event;
+
+  await createLead({
+    siteId: event.site_id,
+    visitorId: event.visitor_id,
+    sessionId: event.session_id,
+    source: "website_form",
+    customerName: lead.customerName,
+    companyName: lead.companyName,
+    customerPhone: lead.customerPhone,
+    customerEmail: lead.customerEmail,
+    serviceType: lead.serviceType,
+    requirements: lead.requirements,
+    summary: lead.summary,
+    sourceDetail: {
+      event_key: event.event_key,
+      event_id: event.id,
+      page_url: event.page_url,
+      page_path: event.page_path,
+      occurred_at: event.occurred_at,
+      utm_source: event.utm_source,
+      utm_campaign: event.utm_campaign,
+      capture_path: "worker_repairable_event"
+    }
+  });
+
+  return event;
 }
 
 async function processAnalogOSEvent(outboxId: string) {
@@ -103,6 +147,45 @@ async function processAnalogOSEvent(outboxId: string) {
     await markAnalogOSEventAttempt(outboxId, error instanceof Error ? error.message : String(error));
     throw error;
   }
+}
+
+async function recoverMissingCollectorLeadJobs(limit = 25): Promise<number> {
+  const result = await db.query(
+    `SELECT e.id
+     FROM events e
+     WHERE e.event_name IN ('form_submit','lead_submit')
+       AND e.occurred_at >= NOW() - INTERVAL '30 days'
+       AND NULLIF(BTRIM(COALESCE(
+         e.payload->>'customer_phone',
+         e.payload->>'phone',
+         e.payload->>'customer_email',
+         e.payload->>'email'
+       )), '') IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM leads l
+         WHERE l.site_id=e.site_id
+           AND l.source_detail->>'event_key'=e.event_key
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM jobs j
+         WHERE j.dedupe_key='event.process:' || e.id::text
+           AND j.status IN ('queued','processing','failed')
+       )
+     ORDER BY e.occurred_at ASC
+     LIMIT $1`,
+    [limit]
+  );
+
+  for (const row of result.rows) {
+    await createJob(
+      "event.process",
+      "event",
+      row.id,
+      { eventId: row.id },
+      { forceRequeue: true }
+    );
+  }
+  return result.rowCount ?? 0;
 }
 
 async function processCall(callId: string) {
@@ -168,12 +251,17 @@ async function handle(job: JobEnvelope) {
 
 let stopping = false;
 let lastDailyReconciliationCheckAt = 0;
+let lastCollectorLeadRepairCheckAt = 0;
 process.on("SIGINT", () => { stopping = true; });
 process.on("SIGTERM", () => { stopping = true; });
 
 while (!stopping) {
   await recoverJobs();
   await recoverAnalogOSEvents().catch(() => undefined);
+  if (Date.now() - lastCollectorLeadRepairCheckAt >= 60_000) {
+    lastCollectorLeadRepairCheckAt = Date.now();
+    await recoverMissingCollectorLeadJobs(25).catch(() => undefined);
+  }
   if (Date.now() - lastDailyReconciliationCheckAt >= 60_000) {
     lastDailyReconciliationCheckAt = Date.now();
     await ensureDailyAnalogOSReconciliationJob(createJob).catch(() => undefined);

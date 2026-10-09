@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { config } from "./config.js";
 import { buildAnalogOSEvent, buildAnalogOSWebhookUrl } from "./analog-os-events.js";
+import { assertAnalogOSDeliveryResponse } from "./analog-os-response.js";
 
 export async function syncAnalogOS(type: string, data: unknown, aggregateType = "lead", aggregateId = "unknown") {
   if (!config.ANALOG_OS_WEBHOOK_URL) return;
@@ -15,7 +16,8 @@ export async function syncAnalogOS(type: string, data: unknown, aggregateType = 
     headers: { "content-type": "application/json", "x-analog-signature": signature },
     body
   });
-  if (!response.ok) throw new Error(`analog_os_sync_failed:${response.status}`);
+  const acknowledgement = await response.json().catch(() => null) as { ok?: boolean; error?: string; event?: string; aggregate_id?: string } | null;
+  assertAnalogOSDeliveryResponse(response.status, acknowledgement);
 }
 
 export async function deliverAnalogOSEvent(payload: unknown): Promise<void> {
@@ -30,5 +32,6 @@ export async function deliverAnalogOSEvent(payload: unknown): Promise<void> {
     headers: { "content-type": "application/json", "x-analog-signature": signature },
     body: JSON.stringify({ event, signature })
   });
-  if (!response.ok) throw new Error(`analog_os_sync_failed:${response.status}`);
+  const acknowledgement = await response.json().catch(() => null) as { ok?: boolean; error?: string; event?: string; aggregate_id?: string } | null;
+  assertAnalogOSDeliveryResponse(response.status, acknowledgement);
 }
