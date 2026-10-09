@@ -200,6 +200,7 @@ export function buildDashboardDeadLetterSummaryQuery(): string {
       job_type,
       CASE
         WHEN last_error IS NULL OR BTRIM(last_error)='' THEN 'no_error'
+        WHEN last_error ILIKE '%utm_source%does not exist%' OR last_error ILIKE '%utm_campaign%does not exist%' THEN 'collector_event_utm_schema_mismatch'
         WHEN last_error LIKE 'analog_os_sync_failed:%' THEN 'analog_os_sync_failed'
         WHEN last_error LIKE 'analog_os_sync_rejected:%' THEN 'analog_os_sync_rejected'
         WHEN last_error LIKE 'notification_webhook_%' THEN 'notification_webhook_failed'

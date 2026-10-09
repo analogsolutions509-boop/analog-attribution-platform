@@ -10,6 +10,8 @@ import { markAnalogOSEventAttempt, markAnalogOSEventSent, recoverAnalogOSEvents 
 import { config } from "./config.js";
 import { createLead } from "./leads.js";
 import { normalizeCollectorEventLead } from "./collector-event-lead.js";
+import { collectorEventQuery } from "./collector-event-query.js";
+import { isRecoverableCollectorEventSchemaMismatch } from "./collector-event-recovery.js";
 import { deliverNotification, queueNotification } from "./notifications.js";
 import {
   ensureDailyAnalogOSReconciliationJob,
@@ -83,7 +85,7 @@ async function recoverJobs(): Promise<void> {
 
 async function processEvent(eventId: string) {
   const result = await db.query(
-    "SELECT id,site_id,visitor_id,session_id,event_key,event_name,occurred_at,page_url,page_path,utm_source,utm_campaign,payload FROM events WHERE id=$1",
+    collectorEventQuery,
     [eventId]
   );
   if (!result.rowCount) throw new Error("event_not_found");
@@ -188,6 +190,42 @@ async function recoverMissingCollectorLeadJobs(limit = 25): Promise<number> {
   return result.rowCount ?? 0;
 }
 
+async function recoverDeadLetterCollectorEventJobs(limit = 25): Promise<number> {
+  const result = await db.query(
+    `SELECT id,job_type,status,aggregate_id,last_error
+     FROM jobs
+     WHERE job_type='event.process'
+       AND status='dead_letter'
+       AND (
+         last_error ILIKE '%utm_source%does not exist%'
+         OR last_error ILIKE '%utm_campaign%does not exist%'
+       )
+     ORDER BY updated_at ASC
+     LIMIT $1`,
+    [limit]
+  );
+
+  let recovered = 0;
+  for (const row of result.rows) {
+    if (!isRecoverableCollectorEventSchemaMismatch(
+      String(row.job_type ?? "event.process"),
+      String(row.status ?? "dead_letter"),
+      String(row.last_error ?? "")
+    )) continue;
+
+    const eventId = String(row.aggregate_id);
+    await createJob(
+      "event.process",
+      "event",
+      eventId,
+      { eventId },
+      { forceRequeue: true }
+    );
+    recovered++;
+  }
+  return recovered;
+}
+
 async function processCall(callId: string) {
   const result = await db.query(
     "SELECT provider, recording_source_url, recording_mime_type FROM calls WHERE id=$1",
@@ -251,15 +289,16 @@ async function handle(job: JobEnvelope) {
 
 let stopping = false;
 let lastDailyReconciliationCheckAt = 0;
-let lastCollectorLeadRepairCheckAt = 0;
+let lastCollectorEventRepairCheckAt = 0;
 process.on("SIGINT", () => { stopping = true; });
 process.on("SIGTERM", () => { stopping = true; });
 
 while (!stopping) {
   await recoverJobs();
   await recoverAnalogOSEvents().catch(() => undefined);
-  if (Date.now() - lastCollectorLeadRepairCheckAt >= 60_000) {
-    lastCollectorLeadRepairCheckAt = Date.now();
+  if (Date.now() - lastCollectorEventRepairCheckAt >= 60_000) {
+    lastCollectorEventRepairCheckAt = Date.now();
+    await recoverDeadLetterCollectorEventJobs(25).catch(() => undefined);
     await recoverMissingCollectorLeadJobs(25).catch(() => undefined);
   }
   if (Date.now() - lastDailyReconciliationCheckAt >= 60_000) {
