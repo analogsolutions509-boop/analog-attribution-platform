@@ -10,9 +10,19 @@ export async function assignTrackingNumber(siteId: string, visitorKey: string, s
       `SELECT tn.phone_number,na.id
        FROM number_assignments na
        JOIN tracking_numbers tn ON tn.id=na.tracking_number_id
+       JOIN forwarding_numbers fn ON fn.id=tn.forwarding_number_id AND fn.active
+       JOIN suppliers dst ON dst.id=tn.destination_supplier_id AND dst.status='active'
        JOIN visitors v ON v.id=na.visitor_id AND v.site_id=$1
        JOIN sessions s ON s.id=na.session_id AND s.site_id=$1 AND s.visitor_id=v.id
-       WHERE tn.site_id=$1 AND tn.active AND s.session_key=$2 AND v.visitor_key=$3 AND na.expires_at>NOW()
+       WHERE tn.site_id=$1 AND tn.active
+         AND s.session_key=$2 AND v.visitor_key=$3 AND na.expires_at>NOW()
+         AND EXISTS (
+           SELECT 1 FROM site_suppliers assigned
+           WHERE assigned.site_id=tn.site_id
+             AND assigned.supplier_id=tn.destination_supplier_id
+             AND assigned.active
+         )
+         AND (NULLIF(dst.contact_phone,'') IS NOT NULL OR NULLIF(dst.endpoint_url,'') IS NOT NULL)
        ORDER BY na.last_seen_at DESC LIMIT 1`,
       [siteId, sessionKey, visitorKey]
     );
@@ -35,11 +45,18 @@ export async function assignTrackingNumber(siteId: string, visitorKey: string, s
     await client.query("DELETE FROM number_assignments WHERE expires_at<NOW()");
     const result = await client.query(
       `SELECT tn.id,tn.phone_number FROM tracking_numbers tn
+       JOIN forwarding_numbers fn ON fn.id=tn.forwarding_number_id AND fn.active
+       JOIN suppliers dst ON dst.id=tn.destination_supplier_id AND dst.status='active'
        WHERE tn.site_id=$1 AND tn.active
-         AND tn.forwarding_number_id IS NOT NULL
-         AND tn.destination_supplier_id IS NOT NULL
+         AND EXISTS (
+           SELECT 1 FROM site_suppliers assigned
+           WHERE assigned.site_id=tn.site_id
+             AND assigned.supplier_id=tn.destination_supplier_id
+             AND assigned.active
+         )
+         AND (NULLIF(dst.contact_phone,'') IS NOT NULL OR NULLIF(dst.endpoint_url,'') IS NOT NULL)
          AND NOT EXISTS (SELECT 1 FROM number_assignments na WHERE na.tracking_number_id=tn.id AND na.expires_at>NOW())
-       ORDER BY tn.id LIMIT 1 FOR UPDATE SKIP LOCKED`,
+       ORDER BY tn.id LIMIT 1 FOR UPDATE OF tn SKIP LOCKED`,
       [siteId]
     );
     if (!result.rowCount) {
