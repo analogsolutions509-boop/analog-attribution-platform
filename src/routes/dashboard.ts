@@ -506,17 +506,25 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
     `, [request.params.callId]);
     if (!callResult.rowCount) return reply.code(404).send({ error: "call_not_found" });
     const call = callResult.rows[0];
-    const [lead, intelligence, transcript, segments] = await Promise.all([
+    const [lead, intelligence, transcript, segments, osContext] = await Promise.all([
       call.lead_id ? db.query("SELECT * FROM leads WHERE id=$1", [call.lead_id]) : Promise.resolve({ rows: [] as any[] }),
       db.query("SELECT * FROM call_intelligence WHERE call_id=$1", [call.id]),
       db.query("SELECT id,provider,model,language,status,full_text,duration_seconds,completed_at FROM call_transcripts WHERE call_id=$1", [call.id]),
-      db.query("SELECT segment_index,speaker_label,speaker_role,start_seconds,end_seconds,text FROM transcript_segments WHERE transcript_id=(SELECT id FROM call_transcripts WHERE call_id=$1) ORDER BY segment_index", [call.id])
+      db.query("SELECT segment_index,speaker_label,speaker_role,start_seconds,end_seconds,text FROM transcript_segments WHERE transcript_id=(SELECT id FROM call_transcripts WHERE call_id=$1) ORDER BY segment_index", [call.id]),
+      call.lead_id ? db.query(
+        "SELECT reconciliation_date,source,source_record,os_lead_id,status,match_method,payload,updated_at " +
+        "FROM analog_os_recovery_records " +
+        "WHERE platform_lead_id=$1 AND status IN ('matched_existing','imported') " +
+        "ORDER BY reconciliation_date DESC,updated_at DESC LIMIT 1",
+        [call.lead_id]
+      ) : Promise.resolve({ rows: [] as any[] })
     ]);
     const recordingUrl = call.recording_storage_key ? await createRecordingDownloadUrl(call.recording_storage_key) : null;
     return reply.send({
       call,
       lead: lead.rows[0] ?? null,
       intelligence: intelligence.rows[0] ?? null,
+      analog_os_context: osContext.rows[0] ?? null,
       transcript: transcript.rows[0] ? { ...transcript.rows[0], segments: segments.rows } : null,
       recording: call.recording_storage_key ? { url: recordingUrl, expires_in_seconds: 900 } : null
     });

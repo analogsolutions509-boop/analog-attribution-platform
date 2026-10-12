@@ -88,10 +88,14 @@ test("verifies the OS signature before transport normalization changes lead fiel
       classification: "LEAD",
       confidence: "HIGH",
       assigned_client: "Client",
+      client_email: " CLIENT@EXAMPLE.COM ",
       forwarded: "YES",
+      forwarded_at: "2026-10-02T09:30:00Z",
+      client_response: "Quoted £500",
       quote_value: "£500",
       sale_value: "",
       commission_rate: "7%",
+      commission_due: "£35",
       status: "new",
       original_message_id: "msg-42",
       notes: "",
@@ -101,5 +105,10 @@ test("verifies the OS signature before transport normalization changes lead fiel
   };
   const signature = signAnalogOSRequest(JSON.stringify(payload), "test-secret");
   assert.equal(verifyAnalogOSExport(payload, signature, "test-secret"), true);
-  assert.equal(normalizeOSLead(payload.leads[0]).customer_email, "buyer@example.com");
+  const normalized = normalizeOSLead(payload.leads[0]);
+  assert.equal(normalized.customer_email, "buyer@example.com");
+  assert.equal(normalized.client_email, "client@example.com");
+  assert.equal(normalized.forwarded_at, "2026-10-02T09:30:00Z");
+  assert.equal(normalized.client_response, "Quoted £500");
+  assert.equal(normalized.commission_due, "£35");
 });
