@@ -1,6 +1,7 @@
 export type NotificationWebhookConfig = {
   notificationUrl?: string;
   notificationSecret?: string;
+  // Retained only for legacy callers; these values must never select the OS URL.
   analogOSUrl?: string;
   analogOSSecret?: string;
 };
@@ -8,27 +9,29 @@ export type NotificationWebhookConfig = {
 export type ResolvedNotificationWebhook = {
   url: string;
   signingSecret: string;
-  source: "dedicated" | "analog_os_fallback";
+  source: "dedicated";
 };
 
 export function resolveNotificationWebhook(
   config: NotificationWebhookConfig
 ): ResolvedNotificationWebhook | null {
   const dedicatedUrl = String(config.notificationUrl || "").trim();
-  const osUrl = String(config.analogOSUrl || "").trim();
+  // Backwards-compatible signing secret while the notification endpoint itself
+  // is dedicated. An OS URL is never used as a notification transport.
   const signingSecret = String(config.notificationSecret || config.analogOSSecret || "").trim();
-  const selectedUrl = dedicatedUrl || osUrl;
+  if (!dedicatedUrl || signingSecret.length < 16) return null;
 
-  if (!selectedUrl || signingSecret.length < 16) return null;
-
-  const url = new URL(selectedUrl);
-  if (!dedicatedUrl) {
-    url.searchParams.set("route", "analog-notification");
+  let url: URL;
+  try {
+    url = new URL(dedicatedUrl);
+  } catch {
+    return null;
   }
+  if (url.protocol !== "https:") return null;
 
   return {
     url: url.toString(),
     signingSecret,
-    source: dedicatedUrl ? "dedicated" : "analog_os_fallback"
+    source: "dedicated"
   };
 }

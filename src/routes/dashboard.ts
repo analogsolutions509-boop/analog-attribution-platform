@@ -123,8 +123,26 @@ export function buildDashboardNumbersQuery(filterBySite = false): string {
              COALESCE(
                tn.active
                AND tn.forwarding_number_id IS NOT NULL
-               AND fn.active
-               AND tn.destination_supplier_id IS NOT NULL
+               AND fn.id IS NOT NULL
+               AND fn.active,
+               FALSE
+             ) AS forwarding_ready,
+             COALESCE(
+               tn.active
+               AND tn.forwarding_number_id IS NOT NULL
+               AND fn.id IS NOT NULL
+               AND fn.active,
+               FALSE
+             ) AS pool_ready,
+             CASE
+               WHEN NOT tn.active THEN 'tracking_number_inactive'
+               WHEN tn.forwarding_number_id IS NULL THEN 'forwarding_number_missing'
+               WHEN fn.id IS NULL THEN 'forwarding_number_not_found'
+               WHEN NOT fn.active THEN 'forwarding_number_inactive'
+               ELSE 'ready'
+             END AS pool_issue,
+             COALESCE(
+               tn.destination_supplier_id IS NOT NULL
                AND dst.status='active'
                AND EXISTS (
                  SELECT 1 FROM site_suppliers assigned
@@ -137,24 +155,20 @@ export function buildDashboardNumbersQuery(filterBySite = false): string {
                  OR NULLIF(dst.endpoint_url,'') IS NOT NULL
                ),
                FALSE
-             ) AS pool_ready,
+             ) AS supplier_ready,
              CASE
-               WHEN NOT tn.active THEN 'tracking_number_inactive'
-               WHEN tn.forwarding_number_id IS NULL THEN 'forwarding_number_missing'
-               WHEN fn.id IS NULL THEN 'forwarding_number_not_found'
-               WHEN NOT fn.active THEN 'forwarding_number_inactive'
-               WHEN tn.destination_supplier_id IS NULL THEN 'destination_supplier_missing'
-               WHEN dst.id IS NULL OR dst.status <> 'active' THEN 'destination_supplier_inactive'
+               WHEN tn.destination_supplier_id IS NULL THEN 'default_supplier_missing'
+               WHEN dst.id IS NULL OR dst.status <> 'active' THEN 'default_supplier_inactive'
                WHEN NOT EXISTS (
                  SELECT 1 FROM site_suppliers assigned
                  WHERE assigned.site_id=tn.site_id
                    AND assigned.supplier_id=tn.destination_supplier_id
                    AND assigned.active
-               ) THEN 'destination_supplier_not_assigned_to_site'
+               ) THEN 'default_supplier_not_assigned_to_site'
                WHEN NULLIF(dst.contact_phone,'') IS NULL
-                 AND NULLIF(dst.endpoint_url,'') IS NULL THEN 'destination_contact_missing'
+                 AND NULLIF(dst.endpoint_url,'') IS NULL THEN 'default_supplier_contact_missing'
                ELSE 'ready'
-             END AS pool_issue,
+             END AS supplier_issue,
              COUNT(DISTINCT na.id)::int AS active_assignments,
              COUNT(DISTINCT ss.supplier_id)::int AS destination_count,
              COALESCE(

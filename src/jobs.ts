@@ -1,8 +1,8 @@
 import { db } from "./db.js";
 import { redis } from "./queue.js";
-import { retryDelaySeconds } from "./job-utils.js";
+import { jobDedupeKey, retryDelaySeconds } from "./job-utils.js";
 
-export { retryDelaySeconds } from "./job-utils.js";
+export { jobDedupeKey, retryDelaySeconds } from "./job-utils.js";
 
 export async function createJob(
   jobType: string,
@@ -11,7 +11,7 @@ export async function createJob(
   payload: Record<string, unknown> = {},
   options: { forceRequeue?: boolean } = {}
 ) {
-  const dedupeKey = `${jobType}:${aggregateId}`;
+  const dedupeKey = jobDedupeKey(jobType, aggregateId);
   const result = await db.query(
     `INSERT INTO jobs(job_type, aggregate_type, aggregate_id, dedupe_key, payload)
      VALUES($1,$2,$3,$4,$5)

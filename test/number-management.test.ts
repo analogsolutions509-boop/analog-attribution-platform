@@ -30,7 +30,8 @@ test("number management source exposes forwarding-number administration", async 
   const source = await readFile(new URL("../src/routes/phone-pool.ts", import.meta.url), "utf8");
   assert.ok(source.includes("/v1/dashboard/forwarding-numbers"));
   assert.ok(source.includes("forwarding_number_id"));
-  assert.ok(source.includes("active_number_requires_forwarding_and_destination"));
+  assert.ok(source.includes("active_number_requires_forwarding"));
+  assert.ok(!source.includes("active_number_requires_forwarding_and_destination"));
 });
 
 test("call ingestion snapshots tracking, forwarding and destination numbers", async () => {

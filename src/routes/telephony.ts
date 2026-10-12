@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import twilio from "twilio";
 import { config } from "../config.js";
 import { db } from "../db.js";
 import { executeWazoTransfer, getWazoClient } from "../telephony.js";
@@ -16,6 +17,18 @@ type WazoWebhookOptions = {
   callbackToken?: string;
   legacyHmac?: string;
 };
+
+function twilioClient() {
+  if (!config.TWILIO_ACCOUNT_SID || !config.TWILIO_AUTH_TOKEN) return null;
+  return twilio(config.TWILIO_ACCOUNT_SID, config.TWILIO_AUTH_TOKEN);
+}
+
+function twilioCallback(path: string, params: Record<string, string>): string {
+  const base = config.PUBLIC_API_URL ?? config.AUTH0_APP_BASE_URL;
+  const url = new URL(path, base);
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+  return url.toString();
+}
 
 export async function registerTelephonyRoutes(app: FastifyInstance) {
   const handleWazoWebhook = async (request: any, reply: any, options: WazoWebhookOptions) => {
@@ -78,25 +91,167 @@ export async function registerTelephonyRoutes(app: FastifyInstance) {
     return handleWazoWebhook(request, reply, {callbackEvent:request.params.event, callbackToken:request.params.token});
   });
 
-  app.post<{Params:{callId:string}}>("/v1/telephony/calls/:callId/transfer", async (request, reply) => {
+  app.post<{ Params: { callId: string } }>("/v1/telephony/calls/:callId/transfer", async (request, reply) => {
     if (!(await requireDashboard(app, request, reply))) return;
-    const body=request.body as Record<string,unknown>;
-    const supplierId=typeof body.supplier_id==="string"?body.supplier_id:"";
-    const mode=body.mode==="warm"?"warm":"blind";
-    if(!supplierId) return reply.code(400).send({error:"supplier_id_required"});
-    const call=await db.query("SELECT c.id,c.provider,c.provider_call_id,c.site_id,c.tracking_number,c.forwarding_number,c.destination_number,s.name AS site_name FROM calls c JOIN sites s ON s.id=c.site_id WHERE c.id=$1",[request.params.callId]);
-    if(!call.rowCount) return reply.code(404).send({error:"call_not_found"});
-    const supplier=await db.query(`SELECT ss.rank,s.id,s.name,COALESCE(s.contact_phone,s.endpoint_url) AS destination FROM site_suppliers ss JOIN suppliers s ON s.id=ss.supplier_id WHERE ss.site_id=$1 AND ss.supplier_id=$2 AND ss.active AND s.status='active'`,[call.rows[0].site_id,supplierId]);
-    if(!supplier.rowCount || !supplier.rows[0].destination) return reply.code(422).send({error:"supplier_destination_not_configured"});
-    const attempt=await db.query(`INSERT INTO transfer_attempts(call_id,supplier_id,mode,provider,rank,result) VALUES($1,$2,$3,'wazo',$4,'initiated') RETURNING id`,[call.rows[0].id,supplierId,mode,supplier.rows[0].rank]);
+    const body = request.body as Record<string, unknown>;
+    const supplierId = typeof body.supplier_id === "string" ? body.supplier_id : "";
+    const mode = body.mode === "warm" ? "warm" : "blind";
+    if (!supplierId) return reply.code(400).send({ error: "supplier_id_required" });
+
+    const call = await db.query(
+      `SELECT c.id,c.provider,c.provider_call_id,c.site_id,c.tracking_number,c.forwarding_number,
+              c.destination_number,c.called_number,c.conference_name,c.operator_call_sid,
+              s.name AS site_name
+       FROM calls c JOIN sites s ON s.id=c.site_id
+       WHERE c.id=$1 LIMIT 1`,
+      [request.params.callId]
+    );
+    if (!call.rowCount) return reply.code(404).send({ error: "call_not_found" });
+    const currentCall = call.rows[0];
+
+    const supplier = await db.query(
+      `SELECT ss.rank,s.id,s.name,
+              COALESCE(NULLIF(s.contact_phone,''),NULLIF(s.endpoint_url,'')) AS destination
+       FROM site_suppliers ss
+       JOIN suppliers s ON s.id=ss.supplier_id
+       WHERE ss.site_id=$1 AND ss.supplier_id=$2 AND ss.active AND s.status='active'`,
+      [currentCall.site_id, supplierId]
+    );
+    if (!supplier.rowCount || !supplier.rows[0].destination) {
+      return reply.code(422).send({ error: "supplier_destination_not_configured" });
+    }
+
+    if (currentCall.provider === "twilio") {
+      const client = twilioClient();
+      if (!client) return reply.code(503).send({ error: "twilio_api_not_configured" });
+      const conferenceName = String(currentCall.conference_name ?? "");
+      const operatorCallSid = String(currentCall.operator_call_sid ?? "");
+      if (!conferenceName) return reply.code(409).send({ error: "twilio_conference_not_attached_to_call" });
+      if (!operatorCallSid) return reply.code(409).send({ error: "twilio_operator_call_not_ready" });
+      const from = config.TWILIO_CALLER_ID ?? (currentCall.called_number as string | undefined);
+      if (!from) return reply.code(503).send({ error: "twilio_outbound_caller_id_not_configured" });
+
+      const attempt = await db.query(
+        `INSERT INTO transfer_attempts(call_id,supplier_id,mode,provider,rank,result)
+         VALUES($1,$2,$3,'twilio',$4,'initiated') RETURNING id`,
+        [currentCall.id, supplierId, mode, supplier.rows[0].rank]
+      );
+      const attemptId = String(attempt.rows[0].id);
+      try {
+        // In warm mode, join the operator to the customer conference before
+        // inviting the supplier; if supplier calling fails, the conversation stays connected.
+        if (mode === "warm") {
+          await client.calls(operatorCallSid).update({
+            url: twilioCallback("/v1/providers/twilio/operator/join", { conference: conferenceName }),
+            method: "POST"
+          });
+        }
+
+        const supplierCall = await client.calls.create({
+          to: String(supplier.rows[0].destination),
+          from,
+          url: twilioCallback("/v1/providers/twilio/supplier", {
+            conference: conferenceName,
+            supplier: String(supplier.rows[0].name),
+            website: String(currentCall.site_name)
+          }),
+          method: "POST",
+          statusCallback: twilioCallback("/v1/providers/twilio/transfer-status", { attemptId }),
+          statusCallbackMethod: "POST",
+          statusCallbackEvent: ["initiated", "ringing", "answered", "completed"]
+        });
+
+        await db.query(
+          `UPDATE transfer_attempts
+           SET provider_transfer_id=$2,
+               result=CASE WHEN result IN ('failed','completed','answered') THEN result ELSE 'ringing' END,
+               metadata=metadata || $3::jsonb
+           WHERE id=$1`,
+          [attemptId, supplierCall.sid, JSON.stringify({ supplier_call_sid: supplierCall.sid })]
+        );
+
+        // Blind transfer means the caller stays with the supplier and the Analog
+        // operator drops out. Warm transfer keeps the operator in the conference.
+        if (mode === "blind") {
+          await client.calls(operatorCallSid).update({ status: "completed" }).catch(() => undefined);
+        }
+
+        await queueAnalogOSEvent("transfer.started", "call", currentCall.id, {
+          call_id: currentCall.id,
+          supplier_id: supplierId,
+          attempt_id: attemptId,
+          mode,
+          provider: "twilio",
+          supplier_call_sid: supplierCall.sid
+        }).catch(() => undefined);
+
+        return reply.code(202).send({
+          ok: true,
+          attempt_id: attemptId,
+          provider: "twilio",
+          mode,
+          supplier: supplier.rows[0].name,
+          transfer: { sid: supplierCall.sid, status: supplierCall.status }
+        });
+      } catch (error) {
+        await db.query(
+          "UPDATE transfer_attempts SET result='failed',ended_at=NOW(),metadata=metadata || $2::jsonb WHERE id=$1",
+          [attemptId, JSON.stringify({ error: String(error) })]
+        );
+        return reply.code(502).send({
+          error: "transfer_failed",
+          detail: String(error).slice(0, 300),
+          attempt_id: attemptId
+        });
+      }
+    }
+
+    if (currentCall.provider !== "wazo") {
+      return reply.code(409).send({
+        error: "transfer_provider_not_supported",
+        provider: currentCall.provider
+      });
+    }
+    if (!getWazoClient()) return reply.code(503).send({ error: "wazo_not_configured" });
+
+    const attempt = await db.query(
+      `INSERT INTO transfer_attempts(call_id,supplier_id,mode,provider,rank,result)
+       VALUES($1,$2,$3,'wazo',$4,'initiated') RETURNING id`,
+      [currentCall.id, supplierId, mode, supplier.rows[0].rank]
+    );
     try {
-      const transfer=await executeWazoTransfer({callId:call.rows[0].id,initiatorCall:call.rows[0].provider_call_id,transferredCall:call.rows[0].provider_call_id,context:config.WAZO_CONTEXT,destination:supplier.rows[0].destination,mode,websiteName:call.rows[0].site_name,forwardingNumber:call.rows[0].forwarding_number ?? undefined});
-      await db.query("UPDATE transfer_attempts SET provider_transfer_id=$2,result='ringing' WHERE id=$1",[attempt.rows[0].id,String((transfer as any).id ?? "")]);
-      await queueAnalogOSEvent("transfer.started","call",call.rows[0].id,{call_id:call.rows[0].id,supplier_id:supplierId,attempt_id:attempt.rows[0].id,mode,provider:"wazo"});
-      return reply.code(202).send({ok:true,attempt_id:attempt.rows[0].id,transfer});
-    } catch(error) {
-      await db.query("UPDATE transfer_attempts SET result='failed',metadata=$2 WHERE id=$1",[attempt.rows[0].id,{error:String(error)}]);
-      return reply.code(502).send({error:"transfer_failed",detail:String(error).slice(0,300),attempt_id:attempt.rows[0].id});
+      const transfer = await executeWazoTransfer({
+        callId: currentCall.id,
+        initiatorCall: currentCall.provider_call_id,
+        transferredCall: currentCall.provider_call_id,
+        context: config.WAZO_CONTEXT,
+        destination: supplier.rows[0].destination,
+        mode,
+        websiteName: currentCall.site_name,
+        forwardingNumber: currentCall.forwarding_number ?? undefined
+      });
+      await db.query(
+        "UPDATE transfer_attempts SET provider_transfer_id=$2,result='ringing' WHERE id=$1",
+        [attempt.rows[0].id, String((transfer as any).id ?? "")]
+      );
+      await queueAnalogOSEvent("transfer.started", "call", currentCall.id, {
+        call_id: currentCall.id,
+        supplier_id: supplierId,
+        attempt_id: attempt.rows[0].id,
+        mode,
+        provider: "wazo"
+      }).catch(() => undefined);
+      return reply.code(202).send({ ok: true, attempt_id: attempt.rows[0].id, provider: "wazo", transfer });
+    } catch (error) {
+      await db.query(
+        "UPDATE transfer_attempts SET result='failed',ended_at=NOW(),metadata=metadata || $2::jsonb WHERE id=$1",
+        [attempt.rows[0].id, JSON.stringify({ error: String(error) })]
+      );
+      return reply.code(502).send({
+        error: "transfer_failed",
+        detail: String(error).slice(0, 300),
+        attempt_id: attempt.rows[0].id
+      });
     }
   });
 

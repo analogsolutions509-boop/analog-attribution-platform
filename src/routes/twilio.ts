@@ -6,11 +6,13 @@ import { createJob } from "../jobs.js";
 import { queueAnalogOSEvent } from "../analog-os-outbox.js";
 import { attributeCallToLead } from "../leads.js";
 import { publishCallUpdated, upsertIncomingCall } from "../calls.js";
+import { queueNotification } from "../notifications.js";
 import {
   buildIncomingCallTwiml,
   buildCustomerConferenceTwiml,
   buildOperatorWhisperTwiml,
   buildOperatorJoinConferenceTwiml,
+  buildSupplierBridgeTwiml,
   conferenceNameForCall,
   isTerminalTwilioStatus,
   normalizeTwilioCall,
@@ -79,7 +81,7 @@ async function startOperatorCall(from: string, callSid: string, website: string,
   const conferenceName = conferenceNameForCall(callSid);
   return client.calls.create({
     to: config.TWILIO_OPERATOR_NUMBER,
-    from: config.TWILIO_CALLER_ID ?? config.TWILIO_OPERATOR_NUMBER ?? from,
+    from: config.TWILIO_CALLER_ID ?? from,
     url: callbackWithQuery("/v1/providers/twilio/operator", {
       conference: conferenceName,
       website,
@@ -120,10 +122,12 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
     if (config.TWILIO_OPERATOR_NUMBER) {
       const conferenceName = conferenceNameForCall(call.providerCallId);
       await db.query("UPDATE calls SET conference_name=$2, updated_at=NOW() WHERE id=$1", [callId, conferenceName]);
-      await startOperatorCall(call.calledNumber, call.providerCallId, site.name, call.callerNumber);
+      const operatorCall = await startOperatorCall(call.calledNumber, call.providerCallId, site.name, call.callerNumber);
+      await db.query("UPDATE calls SET operator_call_sid=$2, updated_at=NOW() WHERE id=$1", [callId, operatorCall.sid]);
       const xml = buildCustomerConferenceTwiml(
         conferenceName,
-        publicCallback("/v1/providers/twilio/conference")
+        publicCallback("/v1/providers/twilio/conference"),
+        callbackWithQuery("/v1/providers/twilio/recording", { conference: conferenceName })
       );
       return reply.type("text/xml; charset=utf-8").send(xml);
     }
@@ -147,8 +151,64 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
       conference,
       callSid: typeof query.callSid === "string" ? query.callSid : ""
     });
+    const body = request.body as Record<string, unknown>;
+    const operatorCallSid = typeof body.CallSid === "string" ? body.CallSid : "";
+    const customerCallSid = typeof query.callSid === "string" ? query.callSid : "";
+    if (operatorCallSid && customerCallSid) {
+      await db.query(
+        "UPDATE calls SET operator_call_sid=COALESCE(operator_call_sid,$2),updated_at=NOW() WHERE provider='twilio' AND provider_call_id=$1",
+        [customerCallSid, operatorCallSid]
+      );
+    }
     const xml = buildOperatorWhisperTwiml(conference, actionUrl, website, caller);
     return reply.type("text/xml; charset=utf-8").send(xml);
+  });
+
+  app.post("/v1/providers/twilio/operator/join", async (request, reply) => {
+    if (!twilioAuthorized(request)) return reply.code(401).send({ error: "invalid_twilio_signature" });
+    const query = request.query as Record<string, unknown>;
+    const conference = typeof query.conference === "string" ? query.conference : "";
+    if (!conference) return reply.code(400).send({ error: "conference_required" });
+    return reply.type("text/xml; charset=utf-8").send(buildOperatorJoinConferenceTwiml(conference));
+  });
+
+  app.post("/v1/providers/twilio/supplier", async (request, reply) => {
+    if (!twilioAuthorized(request)) return reply.code(401).send({ error: "invalid_twilio_signature" });
+    const query = request.query as Record<string, unknown>;
+    const conference = typeof query.conference === "string" ? query.conference : "";
+    const supplier = typeof query.supplier === "string" ? query.supplier : "the supplier";
+    const website = typeof query.website === "string" ? query.website : "the website";
+    if (!conference) return reply.code(400).send({ error: "conference_required" });
+    return reply.type("text/xml; charset=utf-8").send(buildSupplierBridgeTwiml(conference, supplier, website));
+  });
+
+  app.post("/v1/providers/twilio/transfer-status", async (request, reply) => {
+    if (!twilioAuthorized(request)) return reply.code(401).send({ error: "invalid_twilio_signature" });
+    const query = request.query as Record<string, unknown>;
+    const attemptId = typeof query.attemptId === "string" ? query.attemptId : "";
+    const body = request.body as Record<string, unknown>;
+    const callSid = typeof body.CallSid === "string" ? body.CallSid : "";
+    const rawStatus = typeof body.CallStatus === "string" ? body.CallStatus.toLowerCase() : "";
+    if (!attemptId || !callSid || !rawStatus) return reply.code(400).send({ error: "transfer_status_context_required" });
+    const failed = ["busy", "failed", "no-answer", "canceled"].includes(rawStatus);
+    const result = rawStatus === "in-progress" ? "answered" :
+      rawStatus === "completed" ? "completed" :
+      failed ? "failed" :
+      rawStatus === "ringing" ? "ringing" : "initiated";
+    const durationRaw = typeof body.CallDuration === "string" ? Number(body.CallDuration) : Number.NaN;
+    const duration = Number.isFinite(durationRaw) && durationRaw >= 0 ? durationRaw : null;
+    await db.query(
+      `UPDATE transfer_attempts
+       SET provider_transfer_id=COALESCE(provider_transfer_id,$2),
+           result=$3,
+           answered_at=CASE WHEN $3 IN ('answered','completed') THEN COALESCE(answered_at,NOW()) ELSE answered_at END,
+           ended_at=CASE WHEN $3 IN ('completed','failed') THEN COALESCE(ended_at,NOW()) ELSE ended_at END,
+           ring_seconds=COALESCE($4,ring_seconds),
+           metadata=metadata || $5::jsonb
+       WHERE id=$1 AND provider='twilio'`,
+      [attemptId, callSid, result, duration, JSON.stringify({ twilio_call_status: rawStatus })]
+    );
+    return reply.type("text/xml; charset=utf-8").send("<Response></Response>");
   });
 
   app.post("/v1/providers/twilio/operator/action", async (request, reply) => {
@@ -189,8 +249,9 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
     }
 
     const call = await db.query(
-      `SELECT c.called_number,c.destination_number,s.name AS supplier_name
+      `SELECT c.called_number,c.destination_number,s.name AS supplier_name,site.name AS website_name
        FROM calls c
+       JOIN sites site ON site.id=c.site_id
        LEFT JOIN tracking_numbers tn ON tn.id=c.tracking_number_id
        LEFT JOIN suppliers s ON s.id=tn.destination_supplier_id
        WHERE c.provider='twilio' AND c.provider_call_id=$1
@@ -204,15 +265,19 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
       response.hangup();
       return reply.type("text/xml; charset=utf-8").send(response.toString());
     }
-    const from = config.TWILIO_CALLER_ID ?? config.TWILIO_OPERATOR_NUMBER ?? (call.rows[0]?.called_number as string | undefined) ?? config.TWILIO_FORWARD_TO;
+    const from = config.TWILIO_CALLER_ID ?? (call.rows[0]?.called_number as string | undefined) ?? config.TWILIO_FORWARD_TO;
     if (!from) return reply.code(503).send({ error: "twilio_from_number_not_configured" });
-    await activeConference.participants().create({
+    await client.calls.create({
       from,
       to: destination,
-      label: "supplier",
-      earlyMedia: true
+      url: callbackWithQuery("/v1/providers/twilio/supplier", {
+        conference,
+        supplier: String(call.rows[0]?.supplier_name ?? "the supplier"),
+        website: String(call.rows[0]?.website_name ?? "the website")
+      }),
+      method: "POST"
     });
-    await activeConference.participants().get(operatorCallSid).remove().catch(() => undefined);
+    await client.calls(operatorCallSid).update({ status: "completed" }).catch(() => undefined);
     const response = new twilio.twiml.VoiceResponse();
     response.say("The supplier is being connected now.");
     response.hangup();
@@ -226,10 +291,28 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
     const event = typeof body.StatusCallbackEvent === "string" ? body.StatusCallbackEvent.trim() : "";
     if (friendlyName) {
       const updated = await db.query(
-        "UPDATE calls SET status=CASE WHEN $2='conference-end' THEN 'completed' WHEN $2='conference-start' THEN 'in-progress' ELSE status END, ended_at=CASE WHEN $2='conference-end' THEN COALESCE(ended_at,NOW()) ELSE ended_at END, duration_seconds=CASE WHEN $2='conference-end' THEN COALESCE(duration_seconds, GREATEST(0, EXTRACT(EPOCH FROM (NOW()-started_at))::int)) ELSE duration_seconds END, updated_at=NOW() WHERE provider='twilio' AND conference_name=$1 RETURNING id",
+        `UPDATE calls
+         SET status=CASE WHEN $2='conference-end' THEN 'completed' WHEN $2='conference-start' THEN 'in-progress' ELSE status END,
+             ended_at=CASE WHEN $2='conference-end' THEN COALESCE(ended_at,NOW()) ELSE ended_at END,
+             duration_seconds=CASE WHEN $2='conference-end' THEN COALESCE(duration_seconds, GREATEST(0, EXTRACT(EPOCH FROM (NOW()-started_at))::int)) ELSE duration_seconds END,
+             updated_at=NOW()
+         WHERE provider='twilio' AND conference_name=$1
+         RETURNING id,site_id,caller_number,called_number,started_at`,
         [friendlyName, event]
       );
-      if (updated.rowCount) await publishCallUpdated(updated.rows[0].id as string);
+      if (updated.rowCount) {
+        const call = updated.rows[0];
+        if (event === "conference-end") {
+          await attributeCallToLead(
+            String(call.id),
+            String(call.site_id),
+            typeof call.caller_number === "string" ? call.caller_number : undefined,
+            call.started_at ? new Date(call.started_at).toISOString() : undefined,
+            typeof call.called_number === "string" ? call.called_number : undefined
+          );
+        }
+        await publishCallUpdated(String(call.id)).catch(() => undefined);
+      }
     }
     return reply.type("text/xml; charset=utf-8").send("<Response></Response>");
   });
@@ -296,11 +379,51 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
     const recordingUrl = typeof body.RecordingUrl === "string" ? body.RecordingUrl.trim() : "";
     const recordingStatus = typeof body.RecordingStatus === "string" ? body.RecordingStatus : "";
 
-    const conferenceName = typeof body.FriendlyName === "string" ? body.FriendlyName.trim() : "";
+    const query = request.query as Record<string, unknown>;
+    const conferenceName =
+      (typeof query.conference === "string" ? query.conference.trim() : "") ||
+      (typeof body.FriendlyName === "string" ? body.FriendlyName.trim() : "");
     if (!callSid && !conferenceName) return reply.code(400).send({ error: "call_or_conference_required" });
+
+    const normalizedRecordingStatus = recordingStatus.toLowerCase();
+    if (normalizedRecordingStatus === "absent" || normalizedRecordingStatus === "failed") {
+      const callResult = callSid
+        ? await db.query(
+            `SELECT id,site_id,caller_number,called_number,started_at
+             FROM calls WHERE provider='twilio' AND provider_call_id=$1 LIMIT 1`,
+            [callSid]
+          )
+        : await db.query(
+            `SELECT id,site_id,caller_number,called_number,started_at
+             FROM calls WHERE provider='twilio' AND conference_name=$1 LIMIT 1`,
+            [conferenceName]
+          );
+      if (!callResult.rowCount) return reply.code(404).send({ error: "call_not_found" });
+
+      const call = callResult.rows[0];
+      await db.query(
+        "UPDATE calls SET recording_status=$2,updated_at=NOW() WHERE id=$1",
+        [call.id, normalizedRecordingStatus]
+      );
+      const leadId = await attributeCallToLead(
+        String(call.id),
+        String(call.site_id),
+        typeof call.caller_number === "string" ? call.caller_number : undefined,
+        call.started_at ? new Date(call.started_at).toISOString() : undefined,
+        typeof call.called_number === "string" ? call.called_number : undefined
+      );
+      if (leadId) {
+        await Promise.all([
+          queueNotification({ leadId, callId: String(call.id), recipientType: "internal", channel: "email" }),
+          queueNotification({ leadId, callId: String(call.id), recipientType: "supplier", channel: "email" })
+        ]);
+      }
+      await publishCallUpdated(String(call.id)).catch(() => undefined);
+      return reply.send({ ok: true, call_id: call.id, status: normalizedRecordingStatus, notification_queued: Boolean(leadId) });
+    }
+
     if (!recordingUrl) return reply.code(400).send({ error: "recording_url_required" });
     if (!isSafeRecordingUrl(recordingUrl)) return reply.code(400).send({ error: "secure_recording_url_required" });
-    if (recordingStatus === "absent" || recordingStatus === "failed") return reply.send({ ok: true, status: recordingStatus });
 
     if (recordingStatus === "in-progress") {
       if (callSid) {

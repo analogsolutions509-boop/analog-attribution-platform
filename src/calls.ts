@@ -191,6 +191,16 @@ export async function archiveRecording(
   return key;
 }
 
+export async function queueCallCompletionNotifications(callId: string): Promise<void> {
+  const lead = await db.query("SELECT lead_id FROM calls WHERE id=$1 LIMIT 1", [callId]);
+  const leadId = lead.rows[0]?.lead_id as string | undefined;
+  if (!leadId) return;
+  await Promise.all([
+    queueNotification({ leadId, callId, recipientType: "internal", channel: "email" }),
+    queueNotification({ leadId, callId, recipientType: "supplier", channel: "email" })
+  ]);
+}
+
 export async function completeTranscript(
   callId: string,
   transcript: Awaited<ReturnType<typeof transcribeFile>>,
@@ -226,8 +236,19 @@ export async function completeTranscript(
     model: transcript.model, duration_seconds: transcript.duration
   });
 
-  if (!apiKey) return;
-  const intelligence = await analyzeTranscript(transcript.text, apiKey);
+  if (!apiKey) {
+    await queueCallCompletionNotifications(callId);
+    return;
+  }
+
+  let intelligence: Awaited<ReturnType<typeof analyzeTranscript>>;
+  try {
+    intelligence = await analyzeTranscript(transcript.text, apiKey);
+  } catch (error) {
+    // Deliver the recorded lead even if AI summary generation is unavailable.
+    await queueCallCompletionNotifications(callId);
+    throw error;
+  }
   await db.query(
     `INSERT INTO call_intelligence(
       call_id, model, summary, customer_name, company_name, customer_email, customer_phone,
@@ -310,13 +331,11 @@ export async function completeTranscript(
   await queueAnalogOSEvent("call.intelligence.completed", "call", callId, {
     call_id: callId, transcript_id: transcriptId, intelligence
   });
+  await queueCallCompletionNotifications(callId);
   const lead = await db.query("SELECT lead_id FROM calls WHERE id=$1", [callId]);
   const leadId = lead.rows[0]?.lead_id as string | undefined;
   if (leadId) {
-    await Promise.all([
-      queueNotification({leadId, callId, recipientType:"internal", channel:"email"}),
-      queueNotification({leadId, callId, recipientType:"supplier", channel:"email"}),
-      queueNotification({leadId, callId, recipientType:"supplier", channel:"sms"})
-    ]);
+    // The SMS adapter is a separate capability; email delivery must not wait on it.
+    await queueNotification({ leadId, callId, recipientType: "supplier", channel: "sms" });
   }
 }

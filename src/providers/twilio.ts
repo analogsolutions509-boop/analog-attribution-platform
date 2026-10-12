@@ -90,20 +90,24 @@ export function conferenceNameForCall(callSid: string): string {
   return `analog-${stableCallFingerprint(callSid).slice(0, 24)}`;
 }
 
-export function buildCustomerConferenceTwiml(conferenceName: string, statusCallbackUrl: string): string {
+export function buildCustomerConferenceTwiml(
+  conferenceName: string,
+  statusCallbackUrl: string,
+  recordingCallbackUrl = statusCallbackUrl
+): string {
   const response = new twilio.twiml.VoiceResponse();
+  response.say("This call may be recorded for quality assurance purposes.");
   const dial = response.dial();
   dial.conference({
-    startConferenceOnEnter: false,
+    startConferenceOnEnter: true,
     endConferenceOnExit: false,
     record: "record-from-start",
-    recordingStatusCallback: statusCallbackUrl,
+    recordingStatusCallback: recordingCallbackUrl,
     recordingStatusCallbackMethod: "POST",
     recordingStatusCallbackEvent: ["in-progress", "completed", "absent"],
     statusCallback: statusCallbackUrl,
     statusCallbackMethod: "POST",
     statusCallbackEvent: ["start", "end", "join", "leave"],
-    waitUrl: "",
     beep: "false"
   }, conferenceName);
   return response.toString();
@@ -111,20 +115,17 @@ export function buildCustomerConferenceTwiml(conferenceName: string, statusCallb
 
 export function buildOperatorWhisperTwiml(
   conferenceName: string,
-  actionUrl: string,
+  _actionUrl: string,
   websiteName: string,
   callerNumber?: string
 ): string {
   const response = new twilio.twiml.VoiceResponse();
-  const gather = response.gather({
-    numDigits: 1,
-    timeout: 8,
-    action: actionUrl,
-    method: "POST"
-  });
-  gather.say(`Analog call from ${websiteName}. Caller ${callerNumber ?? "unknown"}. Press 1 to connect the supplier. Press 2 to keep the call with Analog. Press 3 to end the call.`);
-  response.say("No selection received. The call will remain with Analog.");
-  response.redirect(actionUrl);
+  response.say(`This call is from ${websiteName}. Caller ${callerNumber ?? "unknown"}. The call is recorded for quality assurance.`);
+  const dial = response.dial();
+  dial.conference({
+    startConferenceOnEnter: true,
+    endConferenceOnExit: false
+  }, conferenceName);
   return response.toString();
 }
 
@@ -135,9 +136,13 @@ export function buildOperatorJoinConferenceTwiml(conferenceName: string): string
   return response.toString();
 }
 
-export function buildSupplierBridgeTwiml(conferenceName: string, supplierName: string): string {
+export function buildSupplierBridgeTwiml(
+  conferenceName: string,
+  supplierName: string,
+  websiteName = "the website"
+): string {
   const response = new twilio.twiml.VoiceResponse();
-  response.say(`Connecting you to ${supplierName}.`);
+  response.say(`This call is from Analog Solutions, regarding a lead from ${websiteName}. Please stay on the line while we connect you with ${supplierName}.`);
   const dial = response.dial();
   dial.conference({ endConferenceOnExit: false }, conferenceName);
   return response.toString();

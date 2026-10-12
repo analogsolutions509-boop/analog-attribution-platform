@@ -79,7 +79,7 @@ export async function queueNotification(input:NotificationRequest) {
     caller_email:input.recipientType==="internal" ? row.customer_email ?? null : null,
     supplier:input.recipientType==="supplier" ? row.supplier_name ?? null : null,
     summary:call?.summary ?? row.summary ?? null,
-    transcript:input.recipientType === "internal" ? call?.full_text ?? null : null,
+    transcript:call?.full_text ?? null,
     duration_seconds:call?.duration_seconds ?? null,
     recording_url:recordingUrl,
     outcome_links:outcomes,

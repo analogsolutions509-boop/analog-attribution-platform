@@ -125,8 +125,8 @@ export async function registerPhonePoolRoutes(app: FastifyInstance) {
       typeof body.forwarding_number_id === "string" ? body.forwarding_number_id.trim() || null : null;
     const active = body.active !== false;
     if (!siteId || !numbers.length) return reply.code(400).send({ error: "site_id_and_number_required" });
-    if (active && (!forwardingNumberId || !destinationSupplierId)) {
-      return reply.code(400).send({ error: "active_number_requires_forwarding_and_destination" });
+    if (active && !forwardingNumberId) {
+      return reply.code(400).send({ error: "active_number_requires_forwarding" });
     }
     if (forwardingNumberId) {
       const forwarding = await db.query("SELECT id FROM forwarding_numbers WHERE id=$1 AND active LIMIT 1", [forwardingNumberId]);
@@ -195,8 +195,8 @@ export async function registerPhonePoolRoutes(app: FastifyInstance) {
         : typeof body.forwarding_number_id === "string" ? body.forwarding_number_id.trim() : null;
     }
     if (!siteId || !phoneNumber) return reply.code(400).send({ error: "site_id_and_number_required" });
-    if (active && (!forwardingNumberId || !destinationSupplierId)) {
-      return reply.code(400).send({ error: "active_number_requires_forwarding_and_destination" });
+    if (active && !forwardingNumberId) {
+      return reply.code(400).send({ error: "active_number_requires_forwarding" });
     }
     if (forwardingNumberId) {
       const forwarding = await db.query("SELECT id FROM forwarding_numbers WHERE id=$1 AND active LIMIT 1", [forwardingNumberId]);
@@ -260,8 +260,18 @@ export async function registerPhonePoolRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: "visitor_id_and_session_id_required" });
     }
     const assigned = await assignTrackingNumber(site.id, body.visitor_id, body.session_id);
-    if (!assigned) return reply.code(409).send({ error: "number_pool_exhausted" });
-    return reply.send({ ok: true, phone_number: assigned.phoneNumber, expires_at: assigned.expiresAt });
+    if ("error" in assigned) {
+      const status = assigned.error === "visitor_session_not_found" ? 400
+        : assigned.error === "number_pool_exhausted" ? 409
+        : 503;
+      return reply.code(status).send({ error: assigned.error });
+    }
+    return reply.send({
+      ok: true,
+      phone_number: assigned.phoneNumber,
+      expires_at: assigned.expiresAt,
+      attribution_mode: assigned.attributionMode
+    });
   });
 
   app.post("/v1/phone-pool/assign", async (request, reply) => {
@@ -270,8 +280,18 @@ export async function registerPhonePoolRoutes(app: FastifyInstance) {
     const body = request.body as Record<string, unknown>;
     if (typeof body.visitor_id !== "string" || typeof body.session_id !== "string")
       return reply.code(400).send({ error: "visitor_id_and_session_id_required" });
-    const assigned = await assignTrackingNumber(site.id,body.visitor_id,body.session_id);
-    if (!assigned) return reply.code(409).send({ error: "number_pool_exhausted" });
-    return reply.send({ ok: true, phone_number: assigned.phoneNumber, expires_at: assigned.expiresAt });
+    const assigned = await assignTrackingNumber(site.id, body.visitor_id, body.session_id);
+    if ("error" in assigned) {
+      const status = assigned.error === "visitor_session_not_found" ? 400
+        : assigned.error === "number_pool_exhausted" ? 409
+        : 503;
+      return reply.code(status).send({ error: assigned.error });
+    }
+    return reply.send({
+      ok: true,
+      phone_number: assigned.phoneNumber,
+      expires_at: assigned.expiresAt,
+      attribution_mode: assigned.attributionMode
+    });
   });
 }

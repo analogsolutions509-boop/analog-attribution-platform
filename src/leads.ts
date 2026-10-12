@@ -13,6 +13,17 @@ export type LeadInput = {
 };
 
 export async function createLead(input: LeadInput) {
+  const callId = typeof input.sourceDetail?.call_id === "string"
+    ? input.sourceDetail.call_id.trim()
+    : "";
+  if (callId) {
+    const existingCallLead = await db.query(
+      "SELECT id FROM leads WHERE site_id=$1 AND source_detail->>'call_id'=$2 LIMIT 1",
+      [input.siteId, callId]
+    );
+    if (existingCallLead.rowCount) return existingCallLead.rows[0].id as string;
+  }
+
   const eventKey = typeof input.sourceDetail?.event_key === "string"
     ? input.sourceDetail.event_key.trim()
     : "";
@@ -57,13 +68,22 @@ export async function createLead(input: LeadInput) {
     }
   }
 
+  const insertSql = `INSERT INTO leads(site_id,visitor_id,session_id,source,customer_name,company_name,customer_phone,customer_email,service_type,requirements,summary,source_detail)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)${callId ? " ON CONFLICT DO NOTHING" : ""} RETURNING id`;
   const result = await db.query(
-    `INSERT INTO leads(site_id,visitor_id,session_id,source,customer_name,company_name,customer_phone,customer_email,service_type,requirements,summary,source_detail)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+    insertSql,
     [input.siteId,input.visitorId??null,input.sessionId??null,input.source??"unknown",input.customerName??null,
      input.companyName??null,normalizePhone(input.customerPhone),input.customerEmail??null,input.serviceType??null,
      input.requirements??{},input.summary??null,input.sourceDetail??{}]
   );
+  if (!result.rowCount && callId) {
+    const existingCallLead = await db.query(
+      "SELECT id FROM leads WHERE site_id=$1 AND source_detail->>'call_id'=$2 LIMIT 1",
+      [input.siteId, callId]
+    );
+    if (existingCallLead.rowCount) return existingCallLead.rows[0].id as string;
+  }
+  if (!result.rowCount) throw new Error("lead_insert_failed");
   const leadId = result.rows[0].id as string;
   const supplierId = await routeLead(leadId,input.siteId,input.serviceType);
   const siteResult = await db.query(
@@ -87,33 +107,72 @@ export async function createLead(input: LeadInput) {
 }
 
 export async function attributeCallToLead(callId: string, siteId: string, phone?: string, startedAt?: string, calledNumber?: string) {
+  const call = await db.query(
+    "SELECT lead_id,started_at FROM calls WHERE id=$1 AND site_id=$2 LIMIT 1",
+    [callId, siteId]
+  );
+  if (!call.rowCount) return null;
+  if (call.rows[0].lead_id) return call.rows[0].lead_id as string;
+
+  // Provider retries must enrich the original call lead rather than create
+  // another lead each time the provider sends a status/recording event.
+  const existingCallLead = await db.query(
+    "SELECT id FROM leads WHERE site_id=$1 AND source_detail->>'call_id'=$2 LIMIT 1",
+    [siteId, callId]
+  );
+  if (existingCallLead.rowCount) {
+    const leadId = existingCallLead.rows[0].id as string;
+    await db.query("UPDATE calls SET lead_id=$2,updated_at=NOW() WHERE id=$1", [callId, leadId]);
+    return leadId;
+  }
+
   const numberAttribution = await attributeNumberToCall(callId, siteId, calledNumber);
-  if (numberAttribution) {
-    const normalized = normalizePhone(phone);
-    const lead = normalized ? await db.query(
-      "SELECT id FROM leads WHERE site_id=$1 AND customer_phone=$2 ORDER BY created_at DESC LIMIT 1",
-      [siteId,normalized]
-    ) : { rowCount: 0, rows: [] as any[] };
-    const leadId = lead.rowCount ? lead.rows[0].id : await createLead({
-      siteId, visitorId: numberAttribution.visitor_id, sessionId: numberAttribution.session_id,
-      source: "phone_call", customerPhone: phone, sourceDetail: { attribution: "dynamic_number", called_number: calledNumber }
-    });
-    await db.query("UPDATE calls SET lead_id=$2,updated_at=NOW() WHERE id=$1",[callId,leadId]);
+  const normalized = normalizePhone(phone);
+  const callStartedAt = startedAt ?? call.rows[0].started_at ?? null;
+
+  const matchedLead = normalized
+    ? await db.query(
+        "SELECT id FROM leads WHERE site_id=$1 AND customer_phone=$2 AND created_at<=COALESCE($3::timestamptz,NOW()) ORDER BY created_at DESC LIMIT 1",
+        [siteId, normalized, callStartedAt]
+      )
+    : { rowCount: 0, rows: [] as any[] };
+
+  if (matchedLead.rowCount) {
+    const leadId = matchedLead.rows[0].id as string;
+    const method = numberAttribution ? "dynamic_number" : "phone_exact";
+    await db.query(
+      "UPDATE calls SET lead_id=$2,attribution_confidence=$3,attribution_method=$4,updated_at=NOW() WHERE id=$1",
+      [callId, leadId, numberAttribution ? 0.99 : 0.92, method]
+    );
     await queueAnalogOSEvent("call.attributed", "call", callId, {
-      call_id: callId, lead_id: leadId, site_id: siteId, method: "dynamic_number"
+      call_id: callId, lead_id: leadId, site_id: siteId, method
     });
     return leadId;
   }
-  const normalized = normalizePhone(phone);
-  if (!normalized) return null;
-  const result = await db.query(
-    "SELECT id FROM leads WHERE site_id=$1 AND customer_phone=$2 AND created_at<=COALESCE($3::timestamptz,NOW()) ORDER BY created_at DESC LIMIT 1",
-    [siteId,normalized,startedAt??null]
-  );
-  if (!result.rowCount) return null;
-  await db.query("UPDATE calls SET lead_id=$2,attribution_confidence=0.92,attribution_method='phone_exact',updated_at=NOW() WHERE id=$1",[callId,result.rows[0].id]);
-  await queueAnalogOSEvent("call.attributed", "call", callId, {
-    call_id: callId, lead_id: result.rows[0].id, site_id: siteId, method: "phone_exact"
+
+  // Every incoming call gets a lead record, even when there was no web form
+  // or visitor-level number attribution. The called tracking number still
+  // identifies the website, while visitor-level attribution remains unknown.
+  const method = numberAttribution ? "dynamic_number" : "tracking_number_site";
+  const leadId = await createLead({
+    siteId,
+    visitorId: numberAttribution?.visitor_id,
+    sessionId: numberAttribution?.session_id,
+    source: "phone_call",
+    customerPhone: phone,
+    sourceDetail: {
+      call_id: callId,
+      attribution: method,
+      called_number: calledNumber ?? null,
+      call_started_at: callStartedAt
+    }
   });
-  return result.rows[0].id;
+  await db.query(
+    "UPDATE calls SET lead_id=$2,attribution_confidence=$3,attribution_method=$4,updated_at=NOW() WHERE id=$1",
+    [callId, leadId, numberAttribution ? 0.99 : 0.85, method]
+  );
+  await queueAnalogOSEvent("call.attributed", "call", callId, {
+    call_id: callId, lead_id: leadId, site_id: siteId, method
+  });
+  return leadId;
 }

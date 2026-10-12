@@ -32,12 +32,8 @@ test("tracking assignment only uses routes that satisfy live dashboard readiness
 
   for (const query of [existingAssignmentQuery, candidateQuery]) {
     assert.match(query, /JOIN forwarding_numbers\s+fn ON fn\.id=tn\.forwarding_number_id AND fn\.active/i);
-    assert.match(query, /JOIN suppliers\s+dst ON dst\.id=tn\.destination_supplier_id AND dst\.status='active'/i);
-    assert.match(query, /site_suppliers\s+assigned/i);
-    assert.match(query, /assigned\.site_id=tn\.site_id/i);
-    assert.match(query, /assigned\.supplier_id=tn\.destination_supplier_id/i);
-    assert.match(query, /assigned\.active/i);
-    assert.match(query, /contact_phone/i);
-    assert.match(query, /endpoint_url/i);
+    assert.doesNotMatch(query, /JOIN suppliers\s+dst/i);
+    assert.doesNotMatch(query, /site_suppliers\s+assigned/i);
+    assert.doesNotMatch(query, /contact_phone|endpoint_url/i);
   }
 });

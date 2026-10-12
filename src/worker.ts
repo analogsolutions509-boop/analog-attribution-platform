@@ -2,13 +2,13 @@ import "dotenv/config";
 import { db } from "./db.js";
 import { redis, closeQueue } from "./queue.js";
 import { createJob, retryDelaySeconds } from "./jobs.js";
-import { archiveRecording, completeTranscript } from "./calls.js";
+import { archiveRecording, completeTranscript, queueCallCompletionNotifications } from "./calls.js";
 import { downloadRecording, extensionForMimeType } from "./call-recording.js";
 import { transcribeBytes } from "./call-intelligence/transcribe.js";
 import { deliverAnalogOSEvent } from "./analog-os.js";
 import { markAnalogOSEventAttempt, markAnalogOSEventSent, recoverAnalogOSEvents } from "./analog-os-outbox.js";
 import { config } from "./config.js";
-import { createLead } from "./leads.js";
+import { attributeCallToLead, createLead } from "./leads.js";
 import { normalizeCollectorEventLead } from "./collector-event-lead.js";
 import { collectorEventQuery } from "./collector-event-query.js";
 import { isRecoverableCollectorEventSchemaMismatch } from "./collector-event-recovery.js";
@@ -170,7 +170,9 @@ async function recoverMissingCollectorLeadJobs(limit = 25): Promise<number> {
        )
        AND NOT EXISTS (
          SELECT 1 FROM jobs j
-         WHERE j.dedupe_key='event.process:' || e.id::text
+         WHERE j.job_type='event.process'
+           AND j.aggregate_type='event'
+           AND j.aggregate_id=e.id::text
            AND j.status IN ('queued','processing','failed')
        )
      ORDER BY e.occurred_at ASC
@@ -228,31 +230,48 @@ async function recoverDeadLetterCollectorEventJobs(limit = 25): Promise<number> 
 
 async function processCall(callId: string) {
   const result = await db.query(
-    "SELECT provider, recording_source_url, recording_mime_type FROM calls WHERE id=$1",
+    `SELECT provider,recording_source_url,recording_mime_type,site_id,caller_number,called_number,started_at,direction
+     FROM calls WHERE id=$1 LIMIT 1`,
     [callId]
   );
   if (!result.rowCount) throw new Error("call_not_found");
   const call = result.rows[0];
-  if (!call.recording_source_url) throw new Error("recording_source_url_missing");
 
-  const recordingAuth = call.provider === "twilio" && config.TWILIO_ACCOUNT_SID && config.TWILIO_AUTH_TOKEN
-    ? { username: config.TWILIO_ACCOUNT_SID, password: config.TWILIO_AUTH_TOKEN }
-    : undefined;
-  const recording = await downloadRecording(call.recording_source_url, 20_000, recordingAuth);
-  const mimeType = call.recording_mime_type ?? recording.mimeType;
-  const key = await archiveRecording(
-    callId,
-    recording.bytes,
-    mimeType,
-    extensionForMimeType(mimeType)
-  );
-  await db.query(
-    "UPDATE calls SET recording_status='stored', recording_storage_key=$2, recording_mime_type=$3, updated_at=NOW() WHERE id=$1",
-    [callId, key, mimeType]
-  );
+  try {
+    if (String(call.direction ?? "").toLowerCase() !== "outbound") {
+      await attributeCallToLead(
+        callId,
+        String(call.site_id),
+        typeof call.caller_number === "string" ? call.caller_number : undefined,
+        call.started_at ? new Date(call.started_at).toISOString() : undefined,
+        typeof call.called_number === "string" ? call.called_number : undefined
+      );
+    }
+    if (!call.recording_source_url) throw new Error("recording_source_url_missing");
 
-  const transcript = await transcribeBytes(recording.bytes, mimeType);
-  await completeTranscript(callId, transcript, process.env.OPENAI_API_KEY ?? "");
+    const recordingAuth = call.provider === "twilio" && config.TWILIO_ACCOUNT_SID && config.TWILIO_AUTH_TOKEN
+      ? { username: config.TWILIO_ACCOUNT_SID, password: config.TWILIO_AUTH_TOKEN }
+      : undefined;
+    const recording = await downloadRecording(call.recording_source_url, 20_000, recordingAuth);
+    const mimeType = call.recording_mime_type ?? recording.mimeType;
+    const key = await archiveRecording(
+      callId,
+      recording.bytes,
+      mimeType,
+      extensionForMimeType(mimeType)
+    );
+    await db.query(
+      "UPDATE calls SET recording_status='stored', recording_storage_key=$2, recording_mime_type=$3, updated_at=NOW() WHERE id=$1",
+      [callId, key, mimeType]
+    );
+
+    const transcript = await transcribeBytes(recording.bytes, mimeType);
+    await completeTranscript(callId, transcript, process.env.OPENAI_API_KEY ?? "");
+  } catch (error) {
+    // A failed archive/transcription must not silently suppress call-lead emails.
+    await queueCallCompletionNotifications(callId).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function handle(job: JobEnvelope) {

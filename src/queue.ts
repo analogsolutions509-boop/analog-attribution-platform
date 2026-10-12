@@ -1,6 +1,7 @@
 import { Redis } from "ioredis";
 import { config } from "./config.js";
 import { db } from "./db.js";
+import { jobDedupeKey } from "./job-utils.js";
 
 export const redis = new Redis(config.REDIS_URL, {
   maxRetriesPerRequest: 3,
@@ -8,7 +9,7 @@ export const redis = new Redis(config.REDIS_URL, {
 });
 
 export async function enqueueEvent(eventId: string): Promise<void> {
-  const dedupeKey = `event:${eventId}`;
+  const dedupeKey = jobDedupeKey("event.process", eventId);
   const result = await db.query(
     "INSERT INTO jobs(job_type, aggregate_type, aggregate_id, dedupe_key, payload) VALUES($1,$2,$3,$4,$5) ON CONFLICT(dedupe_key) DO UPDATE SET updated_at=NOW() RETURNING id",
     ["event.process", "event", eventId, dedupeKey, { eventId }]

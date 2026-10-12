@@ -31,7 +31,8 @@ const message=pick(fields,["message","details","enquiry","inquiry","requirements
 const service=pick(fields,["service","servicetype","projecttype","typeofservice","formfieldsservice"]);
 if(!phone&&!email)return;form.dataset.analogCaptured="1";send("form_submit",{name,company_name:company,phone,customer_phone:phone,email,customer_email:email,service_type:service,message});};
 document.addEventListener("submit",e=>captureForm(e.target),true);
-pageViewReady.then(() => fetch(PU,{method:"POST",headers,body:JSON.stringify({visitor_id:visitor,session_id:session})})).then(r=>r.ok?r.json():null).then(x=>{if(!x?.phone_number)return;document.querySelectorAll("[data-analog-phone]").forEach(e=>{e.textContent=x.phone_number;if(e.tagName==="A")e.href="tel:"+x.phone_number.replace(/\\s/g,"")})}).catch(()=>{});
+const applyTrackingNumber=phoneNumber=>{const tel=phoneNumber.replace(/[\\s()-]/g,"");document.querySelectorAll('a[href^="tel:"]').forEach(a=>{a.setAttribute("href","tel:"+tel);if(/\\d/.test(a.textContent||""))a.textContent=phoneNumber});document.querySelectorAll("[data-analog-phone]").forEach(e=>{e.textContent=phoneNumber;if(e.tagName==="A")e.setAttribute("href","tel:"+tel)})};
+pageViewReady.then(() => fetch(PU,{method:"POST",headers,body:JSON.stringify({visitor_id:visitor,session_id:session})})).then(r=>r.ok?r.json():null).then(x=>{if(x?.phone_number)applyTrackingNumber(x.phone_number)}).catch(()=>{});
 window.AnalogCollector={track:send,captureForm,visitor,session};
 })();`;
 }

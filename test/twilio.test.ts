@@ -93,19 +93,23 @@ test("builds the free-trial customer conference flow", () => {
   const xml = buildCustomerConferenceTwiml("analog-abc123", "https://api.example.com/v1/providers/twilio/conference");
   assert.ok(xml.includes("<Conference"));
   assert.ok(xml.includes("analog-abc123"));
-  assert.ok(xml.includes('startConferenceOnEnter="false"'));
+  assert.ok(xml.includes('startConferenceOnEnter="true"'));
   assert.ok(xml.includes('record="record-from-start"'));
   assert.ok(xml.includes('recordingStatusCallback="https://api.example.com/v1/providers/twilio/conference"'));
   assert.ok(xml.includes('recordingStatusCallbackEvent="in-progress completed absent"'));
-  assert.ok(xml.includes('waitUrl=""'));
+  assert.ok(xml.includes("quality assurance purposes"));
+  assert.ok(!xml.includes('waitUrl=""'), "conference should use Twilio's default hold music instead of silence");
 });
 
-test("builds an operator whisper with 1/2/3 choices", () => {
+test("whispers the website to the operator and then joins the live customer conference for dashboard transfers", () => {
   const xml = buildOperatorWhisperTwiml("analog-abc123", "https://api.example.com/v1/providers/twilio/operator/action", "Birmingham Ready Mix", "+447000111222");
-  assert.ok(xml.includes("Press 1 to connect the supplier"));
-  assert.ok(xml.includes("Press 2 to keep the call with Analog"));
-  assert.ok(xml.includes("Press 3 to end the call"));
-  assert.ok(xml.includes("numDigits=\"1\""));
+  assert.ok(xml.includes("This call is from Birmingham Ready Mix"));
+  assert.ok(xml.includes("+447000111222"));
+  assert.ok(xml.includes("quality assurance"));
+  assert.ok(xml.includes("<Conference"));
+  assert.ok(xml.includes("analog-abc123"));
+  assert.ok(xml.includes('startConferenceOnEnter="true"'));
+  assert.ok(!xml.includes("<Gather"), "primary supplier transfer uses the dashboard buttons, not a keypad call-centre menu");
 });
 
 test("builds the supplier conference leg", () => {
