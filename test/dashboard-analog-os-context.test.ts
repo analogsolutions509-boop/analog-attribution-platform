@@ -1,25 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  buildDashboardCallAnalogOSFallbackQuery,
-  selectUniqueDashboardAnalogOSContext
-} from "../src/routes/dashboard.js";
+import { readFile } from "node:fs/promises";
 
-test("Analog OS fallback lookup is constrained to the call's site, UK date, website, and caller", () => {
-  const sql = buildDashboardCallAnalogOSFallbackQuery();
-  assert.match(sql, /reconciliation_date/);
-  assert.match(sql, /payload->>'website'/);
-  assert.match(sql, /payload->>'customer_phone'/);
-  assert.match(sql, /Europe\/London/);
-  assert.match(sql, /LIMIT 2/);
-});
-
-test("only an unambiguous Analog OS record is attached to an Attribution call", () => {
-  const matched = { os_lead_id: "OS-123" };
-  assert.strictEqual(selectUniqueDashboardAnalogOSContext([matched]), matched);
-  assert.strictEqual(selectUniqueDashboardAnalogOSContext([]), null);
-  assert.strictEqual(
-    selectUniqueDashboardAnalogOSContext([matched, { os_lead_id: "OS-456" }]),
-    null
-  );
+test("call detail loads historical OS data through the read-only source, not the recovery table", async () => {
+  const dashboard = await readFile(new URL("../src/routes/dashboard.ts", import.meta.url), "utf8");
+  const start = dashboard.indexOf("async function loadAnalogOSContextForCall");
+  const end = dashboard.indexOf("export function buildDashboardLeadsQuery", start);
+  assert.ok(start >= 0 && end > start, "call history loader exists");
+  const loader = dashboard.slice(start, end);
+  assert.ok(loader.includes("getReadOnlyAnalogOSContext"));
+  assert.ok(loader.includes("getLondonDateKey(occurredDate)"));
+  assert.ok(loader.includes("catch"));
+  assert.ok(!loader.includes("db.query"));
+  assert.ok(!loader.includes("analog_os_recovery_records"));
 });

@@ -1,7 +1,6 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { db } from "./db.js";
 import { config } from "./config.js";
-import { routeLead } from "./routing.js";
+import { db } from "./db.js";
 
 const LONDON_TZ = "Europe/London";
 
@@ -153,18 +152,20 @@ function getPullUrl(): string {
   return buildAnalogOSPullUrl(base);
 }
 
-async function fetchOSLeads(date: string): Promise<AnalogOSLeadExport> {
+/**
+ * Fetch a signed, date-scoped export from Analog OS. This request only reads the
+ * source export; it does not update Google Sheets or the Attribution database.
+ */
+async function fetchOSLeadsReadOnly(dateInput: string): Promise<AnalogOSLeadExport> {
+  const date = validateReconciliationDate(dateInput);
   const secret = getPullSecret();
   const requestPayload = { date, request_id: randomUUID() };
-  const canonicalBody = JSON.stringify(requestPayload);
-  const signature = signAnalogOSRequest(canonicalBody, secret);
+  const signature = signAnalogOSRequest(JSON.stringify(requestPayload), secret);
   const response = await fetch(getPullUrl(), {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "accept": "application/json"
-    },
-    body: JSON.stringify({ request: requestPayload, signature })
+    headers: { "content-type": "application/json", "accept": "application/json" },
+    body: JSON.stringify({ request: requestPayload, signature }),
+    signal: AbortSignal.timeout(5000)
   });
   if (!response.ok) throw new Error("analog_os_pull_failed:" + response.status);
   const raw = await response.json() as Partial<AnalogOSLeadExport>;
@@ -178,205 +179,95 @@ async function fetchOSLeads(date: string): Promise<AnalogOSLeadExport> {
   if (!signedPayload.ok || signedPayload.date !== date || !signedPayload.generated_at) {
     throw new Error("analog_os_pull_invalid_response");
   }
-  if (!verifyAnalogOSExport(signedPayload as Omit<AnalogOSLeadExport, "signature">, String(raw.signature || ""), secret)) {
+  if (!verifyAnalogOSExport(
+    signedPayload as Omit<AnalogOSLeadExport, "signature">,
+    String(raw.signature || ""),
+    secret
+  )) {
     throw new Error("analog_os_pull_invalid_signature");
   }
-
-  const payload = {
-    ...signedPayload,
-    leads: signedPayload.leads.map((lead) => normalizeOSLead(lead as Record<string, unknown>))
-  };
-  return { ...payload, signature: String(raw.signature) };
-}
-
-async function findPlatformSite(hostname: string) {
-  const host = canonicalHostname(hostname);
-  if (!host) return null;
-  const result = await db.query(
-    "SELECT id,hostname,name FROM sites WHERE REPLACE(LOWER(hostname),'www.','')=$1 AND status='active' LIMIT 1",
-    [host]
-  );
-  return result.rows[0] ?? null;
-}
-async function findExistingLead(
-  siteId: string,
-  date: string,
-  lead: AnalogOSLead
-): Promise<{ id: string; method: string } | null> {
-  if (lead.source_record) {
-    const bySource = await db.query(
-      "SELECT id FROM leads WHERE source_detail->>'analog_os_source_record'=$1 ORDER BY created_at DESC LIMIT 1",
-      [lead.source_record]
-    );
-    if (bySource.rowCount) return { id: bySource.rows[0].id, method: "source_record" };
-  }
-
-  const email = normalizeEmail(lead.customer_email);
-  const phone = normalizePhoneDigits(lead.customer_phone);
-  if (!email && !phone) return null;
-
-  const sql =
-    "SELECT id FROM leads " +
-    "WHERE site_id=$1 " +
-    "AND created_at >= ($2::date AT TIME ZONE 'Europe/London') " +
-    "AND created_at < (($2::date + INTERVAL '1 day') AT TIME ZONE 'Europe/London') " +
-    "AND (($3 <> '' AND LOWER(COALESCE(customer_email,''))=$3) " +
-    "OR ($4 <> '' AND REGEXP_REPLACE(COALESCE(customer_phone,''),'\\D','','g')=$4)) " +
-    "ORDER BY created_at ASC LIMIT 1";
-  const result = await db.query(sql, [siteId, date, email, phone]);
-  return result.rowCount
-    ? { id: result.rows[0].id, method: "same_day_email_or_phone" } : null;
-}
-
-function recoverySourceDetail(lead: AnalogOSLead, date: string) {
   return {
-    analog_os_recovered: true,
-    analog_os_reconciliation_date: date,
-    analog_os_source: lead.source,
-    analog_os_source_record: lead.source_record,
-    analog_os_lead_id: lead.os_lead_id,
-    analog_os_original_message_id: lead.original_message_id || null,
-    analog_os_assigned_client: lead.assigned_client || null,
-    analog_os_forwarded: lead.forwarded || null,
-    analog_os_metadata: lead.metadata,
-    recovery_reason: "lead_present_in_analog_os_missing_from_attribution_platform"
+    ...signedPayload,
+    leads: signedPayload.leads.map((lead) => normalizeOSLead(lead as unknown as Record<string, unknown>)),
+    signature: String(raw.signature)
   };
 }
 
-async function saveRecoveryRecord(input: {
-  date: string; lead: AnalogOSLead; status: string;
-  matchMethod?: string; platformLeadId?: string; error?: string;
+export type ReadOnlyAnalogOSContextInput = {
+  date: string;
+  leads: AnalogOSLead[];
+  siteHostname: string;
+  callerNumber: string;
+  calledNumber: string;
+  generatedAt: string;
+};
+
+export function selectReadOnlyAnalogOSContext(input: ReadOnlyAnalogOSContextInput) {
+  const date = validateReconciliationDate(input.date);
+  const hostname = canonicalHostname(input.siteHostname);
+  const callerDigits = normalizePhoneDigits(input.callerNumber);
+  const calledDigits = normalizePhoneDigits(input.calledNumber);
+  if (!hostname || callerDigits.length < 7) return null;
+
+  const matches = input.leads.filter((lead) => {
+    if (normalizePhoneDigits(lead.customer_phone) !== callerDigits) return false;
+    const websiteMatches = canonicalHostname(lead.website) === hostname;
+    const metadata = lead.metadata || {};
+    const trackingDigits = normalizePhoneDigits(String(
+      metadata.tracking_number ?? metadata.trackingNumber ?? metadata.call_tracking_number ?? ""
+    ));
+    const routeMatches = Boolean(calledDigits) && trackingDigits === calledDigits;
+    return websiteMatches || routeMatches;
+  });
+
+  if (matches.length !== 1) return null;
+  const lead = matches[0];
+  if (!lead) return null;
+  const websiteMatches = canonicalHostname(lead.website) === hostname;
+  return {
+    reconciliation_date: date,
+    source: lead.source,
+    source_record: lead.source_record,
+    os_lead_id: lead.os_lead_id,
+    status: "historical_read_only",
+    match_method: websiteMatches ? "exact caller + website" : "exact caller + tracking number",
+    payload: lead,
+    updated_at: input.generatedAt
+  };
+}
+
+export async function getReadOnlyAnalogOSContext(input: {
+  date: string;
+  siteHostname: string;
+  callerNumber: string;
+  calledNumber: string;
 }) {
-  await db.query(
-    "INSERT INTO analog_os_recovery_records " +
-    "(reconciliation_date,source,source_record,os_lead_id,status,match_method,platform_lead_id,payload,last_error) " +
-    "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) " +
-    "ON CONFLICT(reconciliation_date,source,source_record) DO UPDATE SET " +
-    "os_lead_id=EXCLUDED.os_lead_id,status=EXCLUDED.status,match_method=EXCLUDED.match_method," +
-    "platform_lead_id=EXCLUDED.platform_lead_id,payload=EXCLUDED.payload,last_error=EXCLUDED.last_error,updated_at=NOW()",
-    [
-      input.date,input.lead.source,input.lead.source_record,input.lead.os_lead_id,input.status,
-      input.matchMethod || null,input.platformLeadId || null,input.lead,input.error || null
-    ]
-  );
-}
-async function importRecoveredLead(date: string, lead: AnalogOSLead, siteId: string): Promise<string> {
-  const createdAt = new Date(lead.occurred_at);
-  if (Number.isNaN(createdAt.getTime())) throw new Error("analog_os_lead_invalid_timestamp");
-
-  const result = await db.query(
-    "INSERT INTO leads " +
-    "(site_id,source,customer_name,company_name,customer_phone,customer_email,service_type," +
-    "requirements,summary,source_detail,tags,created_at,updated_at) " +
-    "VALUES($1,'analog_os_recovery',$2,$3,$4,$5,$6,$7::jsonb,$8,$9::jsonb,$10::jsonb,$11,$11) RETURNING id",
-    [
-      siteId,
-      lead.customer_name || null,
-      String(lead.metadata.company_name || "") || null,
-      lead.customer_phone || null,
-      lead.customer_email || null,
-      lead.service || null,
-      JSON.stringify(lead.metadata.requirements || {}),
-      lead.enquiry || null,
-      JSON.stringify(recoverySourceDetail(lead, date)),
-      JSON.stringify(["recovered_from_analog_os"]),
-      createdAt.toISOString()
-    ]
-  );
-  const leadId = result.rows[0].id as string;
-  await routeLead(leadId, siteId, lead.service || undefined, lead.location || undefined);
-  return leadId;
+  const exported = await fetchOSLeadsReadOnly(input.date);
+  return selectReadOnlyAnalogOSContext({
+    ...input,
+    leads: exported.leads,
+    generatedAt: exported.generated_at
+  });
 }
 
-async function beginRun(date: string) {
-  await db.query(
-    "INSERT INTO analog_os_reconciliation_runs " +
-    "(reconciliation_date,status,requested_at,started_at,completed_at,os_leads,matched,imported,duplicates,unresolved,errors,last_error) " +
-    "VALUES($1,'running',NOW(),NOW(),NULL,0,0,0,0,0,0,NULL) " +
-    "ON CONFLICT(reconciliation_date) DO UPDATE SET " +
-    "status='running',requested_at=NOW(),started_at=NOW(),completed_at=NULL," +
-    "os_leads=0,matched=0,imported=0,duplicates=0,unresolved=0,errors=0,last_error=NULL,updated_at=NOW()",
-    [date]
-  );
-}
-
-async function finishRun(date: string, counts: {
-  osLeads: number; matched: number; imported: number; duplicates: number;
-  unresolved: number; errors: number; lastError?: string | null;
-}) {
-  await db.query(
-    "UPDATE analog_os_reconciliation_runs SET status='completed',completed_at=NOW(),os_leads=$2," +
-    "matched=$3,imported=$4,duplicates=$5,unresolved=$6,errors=$7,last_error=$8,updated_at=NOW() " +
-    "WHERE reconciliation_date=$1",
-    [date,counts.osLeads,counts.matched,counts.imported,counts.duplicates,counts.unresolved,counts.errors,counts.lastError || null]
-  );
-}
-
-async function failRun(date: string, error: string) {
-  await db.query(
-    "UPDATE analog_os_reconciliation_runs SET status='failed',completed_at=NOW(),last_error=$2,updated_at=NOW() WHERE reconciliation_date=$1",
-    [date,error]
-  );
-}
+/**
+ * Historical OS reconciliation has been retired. This entry point intentionally
+ * performs no HTTP fetch, database mutation, lead creation, or supplier routing.
+ * Call-detail history is retrieved separately through the signed read-only export.
+ */
 export async function reconcileAnalogOSDate(dateInput: string) {
   const date = validateReconciliationDate(dateInput);
-  await beginRun(date);
-  const counts = { osLeads: 0, matched: 0, imported: 0, duplicates: 0, unresolved: 0, errors: 0 };
-  try {
-    const exported = await fetchOSLeads(date);
-    counts.osLeads = exported.leads.length;
-
-    for (const lead of exported.leads) {
-      try {
-        const existingRecovery = await db.query(
-          "SELECT id,status,platform_lead_id FROM analog_os_recovery_records " +
-          "WHERE reconciliation_date=$1 AND source=$2 AND source_record=$3 LIMIT 1",
-          [date,lead.source,lead.source_record]
-        );
-        if (existingRecovery.rowCount && existingRecovery.rows[0].platform_lead_id) {
-          counts.duplicates++;
-          continue;
-        }
-
-        const site = await findPlatformSite(lead.website);
-        if (!site) {
-          counts.unresolved++;
-          await saveRecoveryRecord({date,lead,status:"unresolved",error:"site_not_registered_in_platform"});
-          continue;
-        }
-
-        const existing = await findExistingLead(site.id, date, lead);
-        if (existing) {
-          counts.matched++;
-          await saveRecoveryRecord({
-            date,lead,status:"matched_existing",matchMethod:existing.method,platformLeadId:existing.id
-          });
-          continue;
-        }
-
-        const leadId = await importRecoveredLead(date, lead, site.id);
-        counts.imported++;
-        await saveRecoveryRecord({
-          date,lead,status:"imported",matchMethod:"recovered",platformLeadId:leadId
-        });
-      } catch (error) {
-        counts.errors++;
-        await saveRecoveryRecord({
-          date,lead,status:"error",
-          error:error instanceof Error ? error.message : String(error)
-        }).catch(() => undefined);
-      }
-    }
-
-    await finishRun(date, counts);
-    return { date, status: "completed", ...counts };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await failRun(date, message);
-    throw error;
-  }
+  return {
+    date,
+    status: "disabled_read_only",
+    osLeads: 0,
+    matched: 0,
+    imported: 0,
+    duplicates: 0,
+    unresolved: 0,
+    errors: 0
+  };
 }
-
 export async function getAnalogOSReconciliationStatus(dateInput: string) {
   const date = validateReconciliationDate(dateInput);
   const result = await db.query(
@@ -388,18 +279,14 @@ export async function getAnalogOSReconciliationStatus(dateInput: string) {
   return result.rows[0];
 }
 
-export async function ensureDailyAnalogOSReconciliationJob(createJobFn: (
-  jobType: string, aggregateType: string, aggregateId: string
-) => Promise<unknown>) {
-  const now = new Date();
-  if (!shouldQueueDailyReconciliation(now)) return null;
-  const date = getPreviousLondonDateKey(now);
-  const dedupeKey = "analog.os.reconcile:" + date;
-  const existing = await db.query("SELECT id,status FROM jobs WHERE dedupe_key=$1 LIMIT 1", [dedupeKey]);
-  if (existing.rowCount) return existing.rows[0].id as string;
-  return createJobFn("analog.os.reconcile", "date", date);
+export async function ensureDailyAnalogOSReconciliationJob(
+  _createJobFn: (
+    jobType: string, aggregateType: string, aggregateId: string
+  ) => Promise<unknown>
+): Promise<null> {
+  // Intentionally do not queue legacy recovery/import jobs in read-only mode.
+  return null;
 }
-
 export function buildRecoveryFingerprint(date: string, lead: AnalogOSLead, siteHostname: string): string {
   return [
     date, canonicalHostname(siteHostname), normalizeEmail(lead.customer_email),

@@ -7,7 +7,7 @@ import { verifyDashboardCredentials, createDashboardSession, verifyDashboardSess
 import { getDashboardAccessMessage, isAllowedDashboardEmail } from "../dashboard-access.js";
 import { createRecordingDownloadUrl } from "../storage/r2.js";
 import { createJob } from "../jobs.js";
-import { getAnalogOSReconciliationStatus, validateReconciliationDate } from "../analog-os-reconciliation.js";
+import { getAnalogOSReconciliationStatus, getLondonDateKey, getReadOnlyAnalogOSContext, validateReconciliationDate } from "../analog-os-reconciliation.js";
 
 const COOKIE_NAME = "analog_dashboard_session";
 const UI_ROOT = join(process.cwd(), "public");
@@ -78,48 +78,27 @@ function setSession(reply: FastifyReply, username: string) {
   reply.header("Set-Cookie", `${COOKIE_NAME}=${encodeURIComponent(session)}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=43200`);
 }
 
-export function buildDashboardCallAnalogOSFallbackQuery(): string {
-  return [
-    "SELECT r.reconciliation_date,r.source,r.source_record,r.os_lead_id,r.status,r.match_method,r.payload,r.updated_at",
-    "FROM analog_os_recovery_records r",
-    "JOIN sites s ON s.id=$1",
-    "WHERE r.status IN ('matched_existing','imported')",
-    "  AND r.reconciliation_date = (($2::timestamptz AT TIME ZONE 'Europe/London')::date)",
-    "  AND regexp_replace(split_part(regexp_replace(lower(trim(COALESCE(r.payload->>'website',''))), '^https?://', ''), '/', 1), '^www\\.', '')",
-    "      = regexp_replace(lower(trim(COALESCE(s.hostname,''))), '^www\\.', '')",
-    "  AND regexp_replace(COALESCE(r.payload->>'customer_phone',''), '[^0-9]', '', 'g') = $3",
-    "ORDER BY r.updated_at DESC",
-    "LIMIT 2"
-  ].join("\n");
-}
-
-export function selectUniqueDashboardAnalogOSContext<T>(records: T[]): T | null {
-  return records.length === 1 ? records[0] ?? null : null;
-}
-
 async function loadAnalogOSContextForCall(call: any): Promise<any | null> {
-  if (call.lead_id) {
-    const linked = await db.query(
-      "SELECT reconciliation_date,source,source_record,os_lead_id,status,match_method,payload,updated_at " +
-      "FROM analog_os_recovery_records " +
-      "WHERE platform_lead_id=$1 AND status IN ('matched_existing','imported') " +
-      "ORDER BY reconciliation_date DESC,updated_at DESC LIMIT 1",
-      [call.lead_id]
-    );
-    if (linked.rows[0]) return linked.rows[0];
-  }
-
-  const callerDigits = String(call.caller_number || "").replace(/\D/g, "");
+  const callerNumber = String(call.caller_number || "");
   const occurredAt = call.started_at || call.created_at;
-  if (!call.site_id || !occurredAt || callerDigits.length < 7) return null;
+  if (!call.site_id || !call.hostname || !occurredAt || callerNumber.replace(/\D/g, "").length < 7) return null;
 
-  const candidates = await db.query(
-    buildDashboardCallAnalogOSFallbackQuery(),
-    [call.site_id, occurredAt, callerDigits]
-  );
-  return selectUniqueDashboardAnalogOSContext(candidates.rows);
+  const occurredDate = new Date(occurredAt);
+  if (Number.isNaN(occurredDate.getTime())) return null;
+
+  try {
+    return await getReadOnlyAnalogOSContext({
+      date: getLondonDateKey(occurredDate),
+      siteHostname: String(call.hostname),
+      callerNumber,
+      calledNumber: String(call.called_number || "")
+    });
+  } catch {
+    // The OS history source is optional for call-detail rendering; a read failure
+    // must never stop the Attribution call record from opening.
+    return null;
+  }
 }
-
 export function buildDashboardLeadsQuery(where: string, limitPosition: number): string {
   return `
       SELECT l.id,l.site_id,l.status,l.source,l.customer_name,l.company_name,l.customer_phone,
@@ -593,20 +572,12 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
 
   app.post("/v1/dashboard/analog-os/reconcile", async (request, reply) => {
     if (!(await requireDashboard(app, request, reply))) return;
-    const body = (request.body ?? {}) as Record<string, unknown>;
-    const date = validateReconciliationDate(
-      typeof body.date === "string" ? body.date : ""
-    );
-    const jobId = await createJob(
-      "analog.os.reconcile",
-      "date",
-      date,
-      {},
-      { forceRequeue: true }
-    );
-    return reply.code(202).send({ ok: true, queued: true, date, job_id: jobId });
+    return reply.code(410).send({
+      error: "analog_os_reconciliation_disabled",
+      mode: "read_only",
+      message: "Historical Analog OS data is display-only. Lead imports and supplier routing are disabled."
+    });
   });
-
   app.get<{ Querystring: { date?: string } }>("/v1/dashboard/analog-os/reconciliation", async (request, reply) => {
     if (!(await requireDashboard(app, request, reply))) return;
     const date = typeof request.query.date === "string" ? request.query.date : "";
