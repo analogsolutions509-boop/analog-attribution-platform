@@ -54,29 +54,46 @@ export function validateTwilioRequest(
 }
 
 export function buildIncomingCallTwiml(
-  calledNumber: string,
   forwardTo: string,
-  statusCallbackUrl: string,
-  recordingCallbackUrl: string
+  statusCallbackUrl: string | undefined,
+  recordingCallbackUrl: string,
+  dialActionUrl?: string,
+  announceRecordingNotice = true,
+  supplierWhisperUrl?: string
 ): string {
   const response = new twilio.twiml.VoiceResponse();
+  if (announceRecordingNotice) {
+    response.say("This call may be recorded for quality assurance purposes.");
+  }
   const dial = response.dial({
-    callerId: calledNumber,
     answerOnBridge: true,
+    ...(dialActionUrl ? { action: dialActionUrl, method: "POST" } : {}),
     record: "record-from-ringing-dual",
     recordingStatusCallback: recordingCallbackUrl,
     recordingStatusCallbackMethod: "POST",
     recordingStatusCallbackEvent: ["completed", "absent"],
     recordingTrack: "both"
   });
-  dial.number({
-    statusCallback: statusCallbackUrl,
-    statusCallbackMethod: "POST",
-    statusCallbackEvent: ["initiated", "ringing", "answered", "completed"]
-  }, forwardTo);
+  const numberOptions = {
+    ...(supplierWhisperUrl ? { url: supplierWhisperUrl, method: "POST" as const } : {}),
+    ...(statusCallbackUrl ? {
+      statusCallback: statusCallbackUrl,
+      statusCallbackMethod: "POST" as const,
+      statusCallbackEvent: ["initiated", "ringing", "answered", "completed"] as ("initiated" | "ringing" | "answered" | "completed")[]
+    } : {})
+  };
+  dial.number(numberOptions, forwardTo);
   return response.toString();
 }
 
+export function buildSupplierWhisperTwiml(websiteName: string, supplierName: string): string {
+  const response = new twilio.twiml.VoiceResponse();
+  response.say(
+    "This call is from Analog Solutions for " + supplierName + ", from the website " + websiteName + ". " +
+    "The call may be recorded for quality assurance. The customer is on the line."
+  );
+  return response.toString();
+}
 export function isTerminalTwilioStatus(status?: string): boolean {
   return status === "completed" || status === "busy" || status === "failed" ||
     status === "no-answer" || status === "canceled";

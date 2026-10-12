@@ -52,7 +52,6 @@ test("validates Twilio's signed form webhook", () => {
 
 test("builds TwiML that records the call and bridges it to the configured destination", () => {
   const xml = buildIncomingCallTwiml(
-    "+441615550100",
     "+447886074706",
     "https://api.example.com/v1/providers/twilio/status",
     "https://api.example.com/v1/providers/twilio/recording"
@@ -60,12 +59,29 @@ test("builds TwiML that records the call and bridges it to the configured destin
 
   assert.ok(xml.includes("<Dial"));
   assert.ok(xml.includes('answerOnBridge="true"'));
-  assert.ok(xml.includes('callerId="+441615550100"'));
+  assert.ok(!xml.includes("callerId="), "the supplier should receive the original caller ID, not the tracking number");
   assert.ok(xml.includes('record="record-from-ringing-dual"'));
   assert.ok(xml.includes('recordingStatusCallback="https://api.example.com/v1/providers/twilio/recording"'));
   assert.ok(xml.includes('statusCallback="https://api.example.com/v1/providers/twilio/status"'));
   assert.ok(xml.includes('statusCallbackEvent="initiated ringing answered completed"'));
   assert.ok(xml.includes(">+447886074706</Number>"));
+});
+
+test("builds automatic direct-dial TwiML with recording notice and ranked-fallback callback", () => {
+  const xml = buildIncomingCallTwiml(
+    "+447886074706",
+    undefined,
+    "https://api.example.com/v1/providers/twilio/recording?callId=call-123",
+    "https://api.example.com/v1/providers/twilio/dial-result?callId=call-123&attemptIndex=0"
+  );
+
+  assert.ok(xml.includes("This call may be recorded for quality assurance purposes."));
+  assert.ok(xml.includes('action="https://api.example.com/v1/providers/twilio/dial-result?callId=call-123&amp;attemptIndex=0"'));
+  assert.ok(!xml.includes("callerId="), "direct dialing must preserve the caller's number and avoid callback loops");
+  assert.ok(xml.includes('recordingStatusCallback="https://api.example.com/v1/providers/twilio/recording?callId=call-123"'));
+  assert.ok(xml.includes('record="record-from-ringing-dual"'));
+  assert.ok(xml.includes(">+447886074706</Number>"));
+  assert.ok(!xml.includes("statusCallbackEvent="));
 });
 
 test("normalizes Dial status callbacks and duration", () => {
@@ -116,4 +132,28 @@ test("builds the supplier conference leg", () => {
   const xml = buildSupplierBridgeTwiml("analog-abc123", "Chorley's Concrete");
   assert.ok(xml.includes("Chorley's Concrete"));
   assert.ok(xml.includes("analog-abc123"));
+});
+
+import { buildSupplierWhisperTwiml } from "../src/providers/twilio.ts";
+
+test("builds a supplier-side whisper identifying the originating website without exposing the caller number", () => {
+  const xml = buildSupplierWhisperTwiml("Birmingham Ready Mix", "Primary supplier");
+  assert.ok(xml.includes("Analog Solutions"));
+  assert.ok(xml.includes("Birmingham Ready Mix"));
+  assert.ok(xml.includes("Primary supplier"));
+  assert.ok(xml.includes("recorded"));
+  assert.ok(!xml.includes("+447000111222"));
+});
+
+test("executes the supplier whisper on the called leg before bridging", () => {
+  const xml = buildIncomingCallTwiml(
+    "+442071234567",
+    undefined,
+    "https://api.example.com/v1/providers/twilio/recording?callId=call-123&attemptIndex=0",
+    "https://api.example.com/v1/providers/twilio/dial-result?callId=call-123&attemptIndex=0",
+    true,
+    "https://api.example.com/v1/providers/twilio/supplier-whisper"
+  );
+  assert.ok(xml.includes('url="https://api.example.com/v1/providers/twilio/supplier-whisper"'));
+  assert.ok(xml.includes('method="POST"'));
 });
