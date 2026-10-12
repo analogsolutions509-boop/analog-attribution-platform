@@ -17,4 +17,9 @@ test("dashboard numbers query combines tracking numbers with website and ranked 
   assert.match(sql, /forwarding_number/);
   assert.match(sql, /LEFT JOIN forwarding_numbers fn/);
   assert.match(sql, /GROUP BY tn\.id,s\.id,dst\.id,fn\.id/);
+  assert.doesNotMatch(sql, /WHERE tn\.site_id=\$1/);
+
+  const filteredSql = buildDashboardNumbersQuery(true);
+  assert.match(filteredSql, /WHERE tn\.site_id=\$1\s+GROUP BY tn\.id,s\.id,dst\.id,fn\.id/);
+  assert.ok(filteredSql.indexOf("WHERE tn.site_id=$1") < filteredSql.indexOf("GROUP BY tn.id,s.id,dst.id,fn.id"));
 });

@@ -108,7 +108,7 @@ export function buildDashboardSitesQuery(): string {
     `;
 }
 
-export function buildDashboardNumbersQuery(): string {
+export function buildDashboardNumbersQuery(filterBySite = false): string {
   return `
       SELECT tn.id,tn.phone_number,tn.label,tn.active,tn.created_at,
              s.id AS site_id,s.name AS site_name,s.hostname,
@@ -180,7 +180,7 @@ export function buildDashboardNumbersQuery(): string {
         ON ss.site_id=s.id AND ss.active
       LEFT JOIN suppliers sp
         ON sp.id=ss.supplier_id AND sp.status='active'
-      GROUP BY tn.id,s.id,dst.id,fn.id
+      ${filterBySite ? "WHERE tn.site_id=$1\n      " : ""}GROUP BY tn.id,s.id,dst.id,fn.id
       ORDER BY s.name,tn.phone_number
     `;
 }
@@ -497,13 +497,8 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { siteId?: string } }>("/v1/dashboard/numbers", async (request, reply) => {
     if (!(await requireDashboard(app, request, reply))) return;
     const params: unknown[] = [];
-    const filter = request.query.siteId ? " WHERE tn.site_id=$1" : "";
     if (request.query.siteId) params.push(request.query.siteId);
-    const sql = buildDashboardNumbersQuery().replace(
-      "      ORDER BY s.name,tn.phone_number",
-      filter + "\n      ORDER BY s.name,tn.phone_number"
-    );
-    const result = await db.query(sql, params);
+    const result = await db.query(buildDashboardNumbersQuery(Boolean(request.query.siteId)), params);
     return reply.send({ numbers: result.rows });
   });
 
