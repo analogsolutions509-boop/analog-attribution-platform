@@ -78,6 +78,48 @@ function setSession(reply: FastifyReply, username: string) {
   reply.header("Set-Cookie", `${COOKIE_NAME}=${encodeURIComponent(session)}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=43200`);
 }
 
+export function buildDashboardCallAnalogOSFallbackQuery(): string {
+  return [
+    "SELECT r.reconciliation_date,r.source,r.source_record,r.os_lead_id,r.status,r.match_method,r.payload,r.updated_at",
+    "FROM analog_os_recovery_records r",
+    "JOIN sites s ON s.id=$1",
+    "WHERE r.status IN ('matched_existing','imported')",
+    "  AND r.reconciliation_date = (($2::timestamptz AT TIME ZONE 'Europe/London')::date)",
+    "  AND regexp_replace(split_part(regexp_replace(lower(trim(COALESCE(r.payload->>'website',''))), '^https?://', ''), '/', 1), '^www\\.', '')",
+    "      = regexp_replace(lower(trim(COALESCE(s.hostname,''))), '^www\\.', '')",
+    "  AND regexp_replace(COALESCE(r.payload->>'customer_phone',''), '[^0-9]', '', 'g') = $3",
+    "ORDER BY r.updated_at DESC",
+    "LIMIT 2"
+  ].join("\n");
+}
+
+export function selectUniqueDashboardAnalogOSContext<T>(records: T[]): T | null {
+  return records.length === 1 ? records[0] ?? null : null;
+}
+
+async function loadAnalogOSContextForCall(call: any): Promise<any | null> {
+  if (call.lead_id) {
+    const linked = await db.query(
+      "SELECT reconciliation_date,source,source_record,os_lead_id,status,match_method,payload,updated_at " +
+      "FROM analog_os_recovery_records " +
+      "WHERE platform_lead_id=$1 AND status IN ('matched_existing','imported') " +
+      "ORDER BY reconciliation_date DESC,updated_at DESC LIMIT 1",
+      [call.lead_id]
+    );
+    if (linked.rows[0]) return linked.rows[0];
+  }
+
+  const callerDigits = String(call.caller_number || "").replace(/\D/g, "");
+  const occurredAt = call.started_at || call.created_at;
+  if (!call.site_id || !occurredAt || callerDigits.length < 7) return null;
+
+  const candidates = await db.query(
+    buildDashboardCallAnalogOSFallbackQuery(),
+    [call.site_id, occurredAt, callerDigits]
+  );
+  return selectUniqueDashboardAnalogOSContext(candidates.rows);
+}
+
 export function buildDashboardLeadsQuery(where: string, limitPosition: number): string {
   return `
       SELECT l.id,l.site_id,l.status,l.source,l.customer_name,l.company_name,l.customer_phone,
@@ -511,13 +553,7 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
       db.query("SELECT * FROM call_intelligence WHERE call_id=$1", [call.id]),
       db.query("SELECT id,provider,model,language,status,full_text,duration_seconds,completed_at FROM call_transcripts WHERE call_id=$1", [call.id]),
       db.query("SELECT segment_index,speaker_label,speaker_role,start_seconds,end_seconds,text FROM transcript_segments WHERE transcript_id=(SELECT id FROM call_transcripts WHERE call_id=$1) ORDER BY segment_index", [call.id]),
-      call.lead_id ? db.query(
-        "SELECT reconciliation_date,source,source_record,os_lead_id,status,match_method,payload,updated_at " +
-        "FROM analog_os_recovery_records " +
-        "WHERE platform_lead_id=$1 AND status IN ('matched_existing','imported') " +
-        "ORDER BY reconciliation_date DESC,updated_at DESC LIMIT 1",
-        [call.lead_id]
-      ) : Promise.resolve({ rows: [] as any[] })
+      loadAnalogOSContextForCall(call)
     ]);
     const recordingUrl = call.recording_storage_key ? await createRecordingDownloadUrl(call.recording_storage_key) : null;
     return reply.send({
