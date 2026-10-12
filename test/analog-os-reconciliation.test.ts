@@ -8,6 +8,9 @@ import {
   normalizeEmail,
   normalizePhoneDigits,
   shouldQueueDailyReconciliation,
+  selectReadOnlyAnalogOSContext,
+  reconcileAnalogOSDate,
+  ensureDailyAnalogOSReconciliationJob,
   signAnalogOSRequest,
   validateReconciliationDate,
   verifyAnalogOSExport
@@ -111,4 +114,56 @@ test("verifies the OS signature before transport normalization changes lead fiel
   assert.equal(normalized.forwarded_at, "2026-10-02T09:30:00Z");
   assert.equal(normalized.client_response, "Quoted £500");
   assert.equal(normalized.commission_due, "£35");
+});
+test("legacy reconciliation is disabled without database writes, lead imports, or supplier routing", async () => {
+  let queued = 0;
+  const result = await reconcileAnalogOSDate("2026-10-02");
+  assert.deepEqual(result, {
+    date: "2026-10-02",
+    status: "disabled_read_only",
+    osLeads: 0,
+    matched: 0,
+    imported: 0,
+    duplicates: 0,
+    unresolved: 0,
+    errors: 0
+  });
+  const job = await ensureDailyAnalogOSReconciliationJob(async () => {
+    queued++;
+    return "unexpected-job";
+  });
+  assert.equal(job, null);
+  assert.equal(queued, 0);
+});
+
+test("matches one historical OS lead by exact caller and website without creating a lead", () => {
+  const lead = normalizeOSLead({
+    source: "WHATCONVERTS", source_record: "WHATCONVERTS:1", os_lead_id: "1",
+    website: "https://www.example.com/", customer_phone: "+44 7700 900123",
+    subject: "Need concrete", metadata: {}
+  });
+  const result = selectReadOnlyAnalogOSContext({
+    date: "2026-10-02", leads: [lead], siteHostname: "example.com",
+    callerNumber: "447700900123", calledNumber: "01610000000", generatedAt: "2026-10-02T12:00:00.000Z"
+  });
+  assert.equal(result?.status, "historical_read_only");
+  assert.equal(result?.match_method, "exact caller + website");
+  assert.equal(result?.reconciliation_date, "2026-10-02");
+  assert.equal((result?.payload as Record<string, unknown>)?.subject, "Need concrete");
+});
+
+test("uses the tracking route when the hostname differs and rejects ambiguous or non-matching history", () => {
+  const lead = normalizeOSLead({
+    source: "EMAIL", source_record: "EMAIL:2", os_lead_id: "2",
+    website: "other.example", customer_phone: "07700900123",
+    metadata: { tracking_number: "+44 161 000 0000" }
+  });
+  const args = {
+    date: "2026-10-02", leads: [lead], siteHostname: "example.com",
+    callerNumber: "07700900123", calledNumber: "441610000000", generatedAt: "2026-10-02T12:00:00.000Z"
+  };
+  assert.equal(selectReadOnlyAnalogOSContext(args)?.match_method, "exact caller + tracking number");
+  assert.equal(selectReadOnlyAnalogOSContext({ ...args, leads: [lead, lead] }), null);
+  assert.equal(selectReadOnlyAnalogOSContext({ ...args, callerNumber: "07700900999" }), null);
+  assert.equal(selectReadOnlyAnalogOSContext({ ...args, calledNumber: "441610000001" }), null);
 });

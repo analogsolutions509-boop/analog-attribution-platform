@@ -13,10 +13,7 @@ import { normalizeCollectorEventLead } from "./collector-event-lead.js";
 import { collectorEventQuery } from "./collector-event-query.js";
 import { isRecoverableCollectorEventSchemaMismatch } from "./collector-event-recovery.js";
 import { deliverNotification, queueNotification } from "./notifications.js";
-import {
-  ensureDailyAnalogOSReconciliationJob,
-  reconcileAnalogOSDate
-} from "./analog-os-reconciliation.js";
+
 
 type JobEnvelope = {
   jobId?: string;
@@ -275,10 +272,10 @@ async function processCall(callId: string) {
 }
 
 async function handle(job: JobEnvelope) {
-  if (job.type === "analog.os.reconcile" && job.jobId) {
-    const result = await db.query("SELECT aggregate_id FROM jobs WHERE id=$1", [job.jobId]);
-    if (!result.rowCount) throw new Error("job_not_found");
-    await reconcileAnalogOSDate(result.rows[0].aggregate_id);
+  if (job.type === "analog.os.reconcile") {
+    // Legacy historical-recovery jobs are intentionally retired. Returning here
+    // lets the normal worker lifecycle mark the queued job complete without importing
+    // a lead, mutating the OS recovery table, or invoking supplier routing.
     return;
   }
   if (job.type === "analog.os.sync" && job.jobId) {
@@ -307,7 +304,7 @@ async function handle(job: JobEnvelope) {
 }
 
 let stopping = false;
-let lastDailyReconciliationCheckAt = 0;
+
 let lastCollectorEventRepairCheckAt = 0;
 process.on("SIGINT", () => { stopping = true; });
 process.on("SIGTERM", () => { stopping = true; });
@@ -319,10 +316,6 @@ while (!stopping) {
     lastCollectorEventRepairCheckAt = Date.now();
     await recoverDeadLetterCollectorEventJobs(25).catch(() => undefined);
     await recoverMissingCollectorLeadJobs(25).catch(() => undefined);
-  }
-  if (Date.now() - lastDailyReconciliationCheckAt >= 60_000) {
-    lastDailyReconciliationCheckAt = Date.now();
-    await ensureDailyAnalogOSReconciliationJob(createJob).catch(() => undefined);
   }
   const result = await redis.brpop("analog:jobs", 5);
   if (!result) continue;

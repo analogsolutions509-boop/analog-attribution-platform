@@ -16,18 +16,33 @@ test("Twilio and Wazo status paths publish OS call updates", async () => {
   assert.ok(telephony.includes("publishCallUpdated"));
 });
 
-test("daily Analog OS reconciliation is wired into the worker and dashboard", async () => {
+test("historical Analog OS context is display-only and reconciliation cannot import or route records", async () => {
   const worker = await readFile(new URL("../src/worker.ts", import.meta.url), "utf8");
   const dashboard = await readFile(new URL("../src/routes/dashboard.ts", import.meta.url), "utf8");
+  const reconciliation = await readFile(new URL("../src/analog-os-reconciliation.ts", import.meta.url), "utf8");
+  const ui = await readFile(new URL("../public/dashboard.html", import.meta.url), "utf8");
   const migration = await readFile(new URL("../migrations/016_analog_os_reconciliation.sql", import.meta.url), "utf8");
-  assert.ok(worker.includes('job.type === "analog.os.reconcile"'));
-  assert.ok(worker.includes("ensureDailyAnalogOSReconciliationJob"));
-  assert.ok(dashboard.includes("/v1/dashboard/analog-os/reconcile"));
+
+  assert.ok(worker.includes('if (job.type === "analog.os.reconcile") {'));
+  assert.ok(!worker.includes("ensureDailyAnalogOSReconciliationJob"));
+  assert.ok(dashboard.includes('error: "analog_os_reconciliation_disabled"'));
+  assert.ok(dashboard.includes("analog_os_context: osContext.rows[0]"));
+  assert.ok(dashboard.includes("getReadOnlyAnalogOSContext"));
+  assert.ok(!dashboard.includes("FROM analog_os_recovery_records"));
+  assert.ok(!dashboard.includes("WHERE platform_lead_id=$1"));
+  assert.ok(reconciliation.includes('status: "disabled_read_only"'));
+  assert.ok(!reconciliation.includes("routeLead"));
+  assert.ok(!reconciliation.includes("INSERT INTO leads"));
+  assert.ok(reconciliation.includes("fetchOSLeadsReadOnly"));
+  assert.ok(!ui.includes("Sync OS records"));
+  assert.ok(!ui.includes("â€¢"));
+  assert.ok(!ui.includes("â€”"));
+  assert.ok(ui.includes("Read-only historical row •"));
+  assert.ok(!ui.includes("/v1/dashboard/analog-os/reconcile"));
   assert.ok(dashboard.includes("/v1/dashboard/analog-os/reconciliation"));
   assert.ok(migration.includes("analog_os_reconciliation_runs"));
   assert.ok(migration.includes("analog_os_recovery_records"));
 });
-
 test("first-party form leads queue both internal and supplier email notifications", async () => {
   const worker = await readFile(new URL("../src/worker.ts", import.meta.url), "utf8");
   assert.ok(worker.includes("const leadId = await createLead({"));
