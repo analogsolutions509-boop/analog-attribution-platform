@@ -7,7 +7,8 @@ export function canonicalCollectorHostname(value: string): string {
   if (!raw) return "";
   try {
     const parsed = new URL(raw.includes("://") ? raw : "https://" + raw);
-    return parsed.hostname.toLowerCase().replace(/\.$/, "");
+    const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
+    return hostname.startsWith("www.") ? hostname.slice(4) : hostname;
   } catch {
     return "";
   }
@@ -34,7 +35,7 @@ export function isAllowedCollectorOrigin(origin: string | undefined, hostname: s
   if (!expected) return false;
   try {
     const parsed = new URL(origin);
-    return parsed.protocol === "https:" && parsed.hostname.toLowerCase().replace(/\.$/, "") === expected;
+    return parsed.protocol === "https:" && canonicalCollectorHostname(parsed.hostname) === expected;
   } catch {
     return false;
   }

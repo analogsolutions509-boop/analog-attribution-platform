@@ -6,14 +6,15 @@ import {
   parseCollectorHostAllowlist
 } from "../src/public-collector.ts";
 
-test("canonicalizes collector hostnames without protocol or trailing dot", () => {
-  assert.equal(canonicalCollectorHostname("HTTPS://WWW.Example.Co.UK/"), "www.example.co.uk");
+test("canonicalizes collector hostnames and treats www as an alias of the apex domain", () => {
+  assert.equal(canonicalCollectorHostname("HTTPS://WWW.Example.Co.UK/"), "example.co.uk");
+  assert.equal(canonicalCollectorHostname("www.example.co.uk."), "example.co.uk");
   assert.equal(canonicalCollectorHostname("example.co.uk."), "example.co.uk");
 });
 
 test("collector origin must match the registered HTTPS hostname", () => {
   assert.equal(isAllowedCollectorOrigin("https://example.co.uk", "example.co.uk"), true);
-  assert.equal(isAllowedCollectorOrigin("https://www.example.co.uk", "example.co.uk"), false);
+  assert.equal(isAllowedCollectorOrigin("https://www.example.co.uk", "example.co.uk"), true);
   assert.equal(isAllowedCollectorOrigin("http://example.co.uk", "example.co.uk"), false);
   assert.equal(isAllowedCollectorOrigin("https://evil.example", "example.co.uk"), false);
   assert.equal(isAllowedCollectorOrigin(undefined, "example.co.uk"), false);

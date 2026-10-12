@@ -20,6 +20,7 @@ import {
 } from "../providers/twilio.js";
 import { isSafeRecordingUrl } from "../call-recording.js";
 import { normalizePhone } from "../utils/phone.js";
+import { resolveTwilioOperatorTarget } from "../providers/twilio-routing.js";
 
 function requestUrl(request: FastifyRequest): string {
   const base = config.PUBLIC_API_URL ?? config.AUTH0_APP_BASE_URL;
@@ -48,9 +49,10 @@ async function resolveSiteByNumber(calledNumber: string | undefined) {
   const normalized = normalizePhone(calledNumber);
   if (!normalized) return null;
   const result = await db.query(
-    `SELECT s.id,s.hostname,s.name,s.status
+    `SELECT s.id,s.hostname,s.name,s.status,fn.phone_number AS forwarding_number
      FROM tracking_numbers tn
      JOIN sites s ON s.id=tn.site_id
+     LEFT JOIN forwarding_numbers fn ON fn.id=tn.forwarding_number_id AND fn.active
      WHERE tn.active AND s.status='active'
        AND regexp_replace(tn.phone_number,'\\D','','g')=$1
      LIMIT 1`,
@@ -75,12 +77,18 @@ function callbackWithQuery(path: string, params: Record<string, string>): string
   return url.toString();
 }
 
-async function startOperatorCall(from: string, callSid: string, website: string, caller?: string) {
+async function startOperatorCall(
+  from: string,
+  callSid: string,
+  website: string,
+  caller: string | undefined,
+  operatorTarget: string
+) {
   const client = twilioClient();
-  if (!client || !config.TWILIO_OPERATOR_NUMBER) throw new Error("twilio_operator_not_configured");
+  if (!client || !operatorTarget) throw new Error("twilio_operator_not_configured");
   const conferenceName = conferenceNameForCall(callSid);
   return client.calls.create({
-    to: config.TWILIO_OPERATOR_NUMBER,
+    to: operatorTarget,
     from: config.TWILIO_CALLER_ID ?? from,
     url: callbackWithQuery("/v1/providers/twilio/operator", {
       conference: conferenceName,
@@ -102,7 +110,11 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
     }
     const site = await resolveSiteByNumber(call.calledNumber);
     if (!site) return reply.code(422).send({ error: "site_resolution_failed" });
-    if (!config.TWILIO_OPERATOR_NUMBER && !config.TWILIO_FORWARD_TO) {
+    const operatorTarget = resolveTwilioOperatorTarget(
+      typeof site.forwarding_number === "string" ? site.forwarding_number : undefined,
+      config.TWILIO_OPERATOR_NUMBER
+    );
+    if (!operatorTarget && !config.TWILIO_FORWARD_TO) {
       return reply.code(503).send({ error: "twilio_operator_or_forward_target_not_configured" });
     }
 
@@ -119,10 +131,10 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
     });
     await attributeCallToLead(callId, site.id, call.callerNumber, call.startedAt, call.calledNumber);
 
-    if (config.TWILIO_OPERATOR_NUMBER) {
+    if (operatorTarget) {
       const conferenceName = conferenceNameForCall(call.providerCallId);
       await db.query("UPDATE calls SET conference_name=$2, updated_at=NOW() WHERE id=$1", [callId, conferenceName]);
-      const operatorCall = await startOperatorCall(call.calledNumber, call.providerCallId, site.name, call.callerNumber);
+      const operatorCall = await startOperatorCall(call.calledNumber, call.providerCallId, site.name, call.callerNumber, operatorTarget);
       await db.query("UPDATE calls SET operator_call_sid=$2, updated_at=NOW() WHERE id=$1", [callId, operatorCall.sid]);
       const xml = buildCustomerConferenceTwiml(
         conferenceName,
