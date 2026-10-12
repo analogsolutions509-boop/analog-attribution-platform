@@ -21,10 +21,14 @@ export type AnalogOSLead = {
   classification: string;
   confidence: string;
   assigned_client: string;
+  client_email: string;
   forwarded: string;
+  forwarded_at: string;
+  client_response: string;
   quote_value: string;
   sale_value: string;
   commission_rate: string;
+  commission_due: string;
   status: string;
   original_message_id: string;
   notes: string;
@@ -122,10 +126,14 @@ export function normalizeOSLead(raw: Record<string, unknown>): AnalogOSLead {
     classification: String(raw.classification || "").trim(),
     confidence: String(raw.confidence || "").trim(),
     assigned_client: String(raw.assigned_client || "").trim(),
+    client_email: normalizeEmail(String(raw.client_email || "")),
     forwarded: String(raw.forwarded || "").trim(),
+    forwarded_at: String(raw.forwarded_at || "").trim(),
+    client_response: String(raw.client_response || "").trim(),
     quote_value: String(raw.quote_value || "").trim(),
     sale_value: String(raw.sale_value || "").trim(),
     commission_rate: String(raw.commission_rate || "").trim(),
+    commission_due: String(raw.commission_due || "").trim(),
     status: String(raw.status || "new").trim(),
     original_message_id: String(raw.original_message_id || "").trim(),
     notes: String(raw.notes || "").trim(),
