@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { readFile } from "node:fs/promises";
 import { config } from "../config.js";
 import { resolveSite } from "../auth.js";
 import { isAllowedCollectorHostname, resolvePublicCollectorSite } from "../public-collector.js";
@@ -63,5 +64,25 @@ export async function registerCollectorRoutes(app: FastifyInstance) {
       .type("application/javascript; charset=utf-8")
       .header("cache-control","public,max-age=300")
       .send(collectorScript(api, siteKey, hostname));
+  });
+
+  app.get("/v1/downloads/analog-attribution-collector.zip", async (request, reply) => {
+    try {
+      const archive = await readFile(
+        new URL("../../wordpress/analog-attribution-collector-package.zip", import.meta.url)
+      );
+      if (archive.length < 1000 || archive.readUInt32LE(0) !== 0x04034b50) {
+        request.log.error("Collector plugin package failed ZIP signature validation.");
+        return reply.code(503).type("text/plain").send("collector_package_unavailable");
+      }
+      return reply
+        .type("application/zip")
+        .header("content-disposition", 'attachment; filename="analog-attribution-collector.zip"')
+        .header("cache-control", "public, max-age=3600")
+        .send(archive);
+    } catch (error) {
+      request.log.error({ err: error }, "Collector plugin package could not be loaded.");
+      return reply.code(503).type("text/plain").send("collector_package_unavailable");
+    }
   });
 }
