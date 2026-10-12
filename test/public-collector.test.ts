@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   canonicalCollectorHostname,
+  isAllowedCollectorHostname,
   isAllowedCollectorOrigin,
   parseCollectorHostAllowlist
 } from "../src/public-collector.ts";
@@ -25,4 +26,12 @@ test("collector host allowlist accepts exact hosts and ignores blanks", () => {
     parseCollectorHostAllowlist("a.co.uk, ,B.co.uk,a.co.uk"),
     ["a.co.uk", "b.co.uk"]
   );
+});
+
+import { isAllowedCollectorHostname } from "../src/public-collector.ts";
+
+test("allowlists the Analog Solutions corporate site in addition to the 20-site fleet allowlist", () => {
+  assert.equal(isAllowedCollectorHostname("analogsolution.com"), true);
+  assert.equal(isAllowedCollectorHostname("www.analogsolution.com"), true);
+  assert.equal(isAllowedCollectorHostname("unowned-analogsolution.com"), false);
 });

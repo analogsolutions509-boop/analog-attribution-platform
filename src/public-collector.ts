@@ -26,7 +26,11 @@ export function parseCollectorHostAllowlist(value: string): string[] {
 export function isAllowedCollectorHostname(hostname: string): boolean {
   const canonical = canonicalCollectorHostname(hostname);
   if (!canonical) return false;
-  return parseCollectorHostAllowlist(config.ANALOG_PUBLIC_COLLECTOR_HOSTS).includes(canonical);
+  const configuredHosts = [
+    ...parseCollectorHostAllowlist(config.ANALOG_PUBLIC_COLLECTOR_HOSTS),
+    ...parseCollectorHostAllowlist(config.ANALOG_PUBLIC_COLLECTOR_EXTRA_HOSTS)
+  ];
+  return new Set(configuredHosts).has(canonical);
 }
 
 export function isAllowedCollectorOrigin(origin: string | undefined, hostname: string): boolean {
