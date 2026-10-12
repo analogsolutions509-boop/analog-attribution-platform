@@ -467,6 +467,37 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
     return reply.send({ calls: result.rows });
   });
 
+  app.get<{ Querystring: { limit?: string; offset?: string; siteId?: string } }>("/v1/dashboard/recordings", async (request, reply) => {
+    if (!(await requireDashboard(app, request, reply))) return;
+    const limit = Math.min(Math.max(Number(request.query.limit ?? 50) || 50, 1), 100);
+    const offset = Math.max(Math.floor(Number(request.query.offset ?? 0) || 0), 0);
+    const params: unknown[] = [];
+    const clauses = ["c.recording_storage_key IS NOT NULL", "c.recording_status='stored'"];
+    if (request.query.siteId) {
+      params.push(request.query.siteId);
+      clauses.push("c.site_id=$" + params.length);
+    }
+    const limitParam = params.length + 1;
+    params.push(limit);
+    const offsetParam = params.length + 1;
+    params.push(offset);
+    const result = await db.query(
+      "SELECT c.id,c.caller_number,c.called_number,c.direction," +
+      "c.started_at,c.created_at,c.duration_seconds,c.recording_status,c.transcript_status," +
+      "c.lead_id,s.name AS site_name,s.hostname,ci.summary,ci.outcome " +
+      "FROM calls c JOIN sites s ON s.id=c.site_id " +
+      "LEFT JOIN call_intelligence ci ON ci.call_id=c.id " +
+      "WHERE " + clauses.join(" AND ") +
+      " ORDER BY c.created_at DESC LIMIT $" + limitParam + " OFFSET $" + offsetParam,
+      params
+    );
+    return reply.send({
+      recordings: result.rows,
+      limit,
+      offset,
+      hasMore: result.rows.length === limit
+    });
+  });
   app.get<{ Params: { callId: string } }>("/v1/dashboard/calls/:callId", async (request, reply) => {
     if (!(await requireDashboard(app, request, reply))) return;
     const callResult = await db.query(`
