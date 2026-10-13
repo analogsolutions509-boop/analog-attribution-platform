@@ -26,6 +26,10 @@ export type ResolvedSecondRingSite = SecondRingSiteRecord & {
   attributionMethod: "explicit_site_id" | "called_number" | "shared_line_unattributed";
 };
 
+export function canAttributeSecondRingCall(attributionMethod?: string | null): boolean {
+  return attributionMethod !== "shared_line_unattributed";
+}
+
 /**
  * Prefer explicit provider/site context, then a registered dedicated number.
  * If neither is available, keep the call under an explicit unattributed sink

@@ -6,7 +6,7 @@ import { upsertIncomingCall } from "../calls.js";
 import { attributeCallToLead } from "../leads.js";
 import { isSafeRecordingUrl } from "../call-recording.js";
 import { normalizePhone } from "../utils/phone.js";
-import { normalizeSecondRingCall, selectSecondRingSiteResolution, verifyWebhookSecret } from "../providers/secondring.js";
+import { canAttributeSecondRingCall, normalizeSecondRingCall, selectSecondRingSiteResolution, verifyWebhookSecret } from "../providers/secondring.js";
 
 function webhookCredential(request: { headers: Record<string, string | string[] | undefined> }): string | undefined {
   const direct = request.headers["x-analog-provider-secret"] ?? request.headers["x-secondring-webhook-secret"];
@@ -93,13 +93,17 @@ export async function registerSecondRingRoutes(app: FastifyInstance) {
       recordingMimeType: call.recordingMimeType
     });
 
-    await attributeCallToLead(
-      callId,
-      site.id,
-      call.callerNumber,
-      call.startedAt,
-      call.calledNumber
-    );
+    // A shared line with no verified website mapping must remain a call-only
+    // record; do not create or route a supplier lead from guessed attribution.
+    if (canAttributeSecondRingCall(site.attributionMethod)) {
+      await attributeCallToLead(
+        callId,
+        site.id,
+        call.callerNumber,
+        call.startedAt,
+        call.calledNumber
+      );
+    }
 
     if (call.recordingUrl) {
       await createJob("call.process", "call", callId);

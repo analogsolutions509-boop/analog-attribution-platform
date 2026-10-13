@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { selectSecondRingSiteResolution } from "../src/providers/secondring.ts";
+import { readFile } from "node:fs/promises";
+import { canAttributeSecondRingCall, selectSecondRingSiteResolution } from "../src/providers/secondring.ts";
 import { buildTranscriptCompletedData } from "../src/analog-os-transcript.ts";
 
 test("shared line calls with no site or tracking-number match are explicitly unattributed", () => {
@@ -65,4 +66,15 @@ test("transcript payload carries full text and segments alongside call and archi
   assert.equal(data.recording_storage_key, "recordings/2026/site-1/call-1.mp3");
   assert.equal(data.transcript_segments.length, 1);
   assert.equal(data.transcript_segments[0].speaker, "speaker_0");
+});
+
+test("shared-line calls remain call-only and are not converted into supplier leads", async () => {
+  assert.equal(canAttributeSecondRingCall("shared_line_unattributed"), false);
+  assert.equal(canAttributeSecondRingCall("explicit_site_id"), true);
+  assert.equal(canAttributeSecondRingCall("called_number"), true);
+
+  const route = await readFile(new URL("../src/routes/secondring.ts", import.meta.url), "utf8");
+  const worker = await readFile(new URL("../src/worker.ts", import.meta.url), "utf8");
+  assert.match(route, /if \(canAttributeSecondRingCall\(site\.attributionMethod\)\)/);
+  assert.match(worker, /const canCreateLead = call\.provider !== "secondring"[\s\S]*canAttributeSecondRingCall/);
 });
