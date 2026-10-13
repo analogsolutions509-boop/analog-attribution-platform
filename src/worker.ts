@@ -8,6 +8,7 @@ import { transcribeBytes } from "./call-intelligence/transcribe.js";
 import { deliverAnalogOSEvent } from "./analog-os.js";
 import { markAnalogOSEventAttempt, markAnalogOSEventSent, recoverAnalogOSEvents } from "./analog-os-outbox.js";
 import { config } from "./config.js";
+import { canAttributeSecondRingCall } from "./providers/secondring.js";
 import { attributeCallToLead, createLead } from "./leads.js";
 import { normalizeCollectorEventLead } from "./collector-event-lead.js";
 import { collectorEventQuery } from "./collector-event-query.js";
@@ -227,7 +228,7 @@ async function recoverDeadLetterCollectorEventJobs(limit = 25): Promise<number> 
 
 async function processCall(callId: string) {
   const result = await db.query(
-    `SELECT provider,recording_source_url,recording_mime_type,site_id,caller_number,called_number,started_at,direction
+    `SELECT provider,recording_source_url,recording_mime_type,site_id,caller_number,called_number,started_at,direction,attribution_method
      FROM calls WHERE id=$1 LIMIT 1`,
     [callId]
   );
@@ -235,7 +236,9 @@ async function processCall(callId: string) {
   const call = result.rows[0];
 
   try {
-    if (String(call.direction ?? "").toLowerCase() !== "outbound") {
+    const canCreateLead = call.provider !== "secondring"
+      || canAttributeSecondRingCall(String(call.attribution_method ?? ""));
+    if (canCreateLead && String(call.direction ?? "").toLowerCase() !== "outbound") {
       await attributeCallToLead(
         callId,
         String(call.site_id),

@@ -36,6 +36,7 @@ const envSchema = z.object({
   ANALOG_PUBLIC_COLLECTOR_EXTRA_HOSTS: z.string().default("analogsolution.com"),
   PUBLIC_API_URL: z.string().url().optional(),
   TELEPHONY_PROVIDER: z.enum(["wazo","secondring","twilio"]).default("wazo"),
+  SECONDRING_SHARED_LINE_HOSTNAME: z.string().min(1).default("shared-secondring-line.internal"),
   TELEPHONY_INTERNAL_SECRET: z.string().min(16).optional(),
   WAZO_API_URL: z.string().url().optional(),
   WAZO_AUTH_TOKEN: z.string().min(1).optional(),

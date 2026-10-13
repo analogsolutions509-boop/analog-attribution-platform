@@ -15,6 +15,43 @@ export type NormalizedSecondRingCall = {
   siteId?: string;
 };
 
+export type SecondRingSiteRecord = {
+  id: string;
+  hostname: string;
+  name: string;
+  status: string;
+};
+
+export type ResolvedSecondRingSite = SecondRingSiteRecord & {
+  attributionMethod: "explicit_site_id" | "called_number" | "shared_line_unattributed";
+};
+
+export function canAttributeSecondRingCall(attributionMethod?: string | null): boolean {
+  return attributionMethod !== "shared_line_unattributed";
+}
+
+/**
+ * Prefer explicit provider/site context, then a registered dedicated number.
+ * If neither is available, keep the call under an explicit unattributed sink
+ * instead of assigning it to an arbitrary website.
+ */
+export function selectSecondRingSiteResolution(input: {
+  explicitSite?: SecondRingSiteRecord | null;
+  calledNumberSite?: SecondRingSiteRecord | null;
+  sharedLineSite?: SecondRingSiteRecord | null;
+}): ResolvedSecondRingSite | null {
+  if (input.explicitSite) {
+    return { ...input.explicitSite, attributionMethod: "explicit_site_id" };
+  }
+  if (input.calledNumberSite) {
+    return { ...input.calledNumberSite, attributionMethod: "called_number" };
+  }
+  if (input.sharedLineSite && input.sharedLineSite.status !== "disabled") {
+    return { ...input.sharedLineSite, attributionMethod: "shared_line_unattributed" };
+  }
+  return null;
+}
+
 function asRecord(value: unknown): JsonRecord | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as JsonRecord
