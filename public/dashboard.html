@@ -56,6 +56,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-3;pointer-events:none;ba
 .reactive-line{position:absolute;left:0;right:0;top:0;height:1px;background:linear-gradient(90deg,transparent,rgba(85,214,255,.6),transparent);animation:scan 5s linear infinite;pointer-events:none;opacity:.45}
 @keyframes scan{from{transform:translateX(-20%)}to{transform:translateX(20%)}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition:none!important}}
+@media print{.side,.top .actions,.toolbar button,#login,.toast{display:none!important}.main{padding:0}.card{box-shadow:none;break-inside:avoid}body{background:#fff;color:#111}.muted{color:#444}}
 </style>
 </head>
 <body>
@@ -93,7 +94,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-3;pointer-events:none;ba
 <button data-view="leads">Leads</button>
 <button data-view="sites">Websites</button>
 <button data-view="numbers">Numbers</button>
-<button data-view="system">System</button><button data-view="reports">Reports</button>
+<button data-view="system">Settings</button><button data-view="reports">Reports</button>
 </nav>
 <small>First-party attribution platform</small>
 </aside>
@@ -110,23 +111,54 @@ body::before{content:"";position:fixed;inset:0;z-index:-3;pointer-events:none;ba
 <div class="card" style="margin-top:14px"><h2>Recent calls</h2><div id="recentCalls"></div></div>
 <div class="card" style="margin-top:14px"><div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">Lead Flow Diagnostic</h2><p class="muted">Last 7 days — see exactly where website activity becomes a lead.</p></div><div id="leadFlowSummary" class="muted"></div></div><div id="leadFlowTable"></div></div>
 </section>
-<section id="callsView" hidden><div class="card"><h2>Calls</h2><div id="callsTable"></div></div></section>
+<section id="callsView" hidden><div class="card">
+  <div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">Calls</h2><p class="muted">Searchable provider call archive with detailed transcripts and attribution.</p><p class="muted">Legacy OS/Google Sheets history currently appears only as read-only context on a uniquely matched call; the full Raw-sheet call archive has not been merged into this list yet.</p></div></div>
+  <div class="toolbar">
+    <input id="callSearch" placeholder="Search caller, number, lead or website" style="min-width:240px">
+    <input id="callStart" type="datetime-local" aria-label="Calls from date">
+    <input id="callEnd" type="datetime-local" aria-label="Calls to date">
+    <select id="callStatus"><option value="">All call outcomes</option><option value="answered">Answered</option><option value="missed">Missed / no duration</option><option value="completed">Completed</option><option value="failed">Failed</option></select>
+    <input id="callLeadType" placeholder="Lead type" style="width:150px">
+    <select id="callProvider"><option value="">All providers</option><option value="whatconverts">WhatConverts</option><option value="secondring">SecondRing</option><option value="wazo">Wazo</option><option value="twilio">Twilio</option></select>
+    <button id="callsSearchBtn" class="btn primary" type="button">Apply filters</button>
+    <button id="callsClearBtn" class="btn" type="button">Clear</button>
+  </div>
+  <div id="callsTable"></div>
+  <div class="toolbar" style="justify-content:center;margin-top:12px"><button id="callsLoadMoreBtn" class="btn" type="button" hidden>Load more calls</button></div>
+</div></section>
 <section id="recordingsView" hidden>
 <div class="card">
   <div class="top" style="margin-bottom:10px">
-    <div><h2 style="margin:0">Recording library</h2><p class="muted">Find archived calls and play them here. Playback links are private and expire after 15 minutes.</p></div>
+    <div><h2 style="margin:0">Recording library</h2><p class="muted">Find archived calls and play them here. Playback links are private and expire after 15 minutes.</p><p class="muted">This library lists recordings archived in Attribution storage. Legacy OS recording links still require a verified export/backfill before they can all appear here.</p></div>
   </div>
   <div class="toolbar">
-    <input id="recordingSearch" placeholder="Search website, caller or number" style="min-width:260px">
-    <button id="recordingsRefreshBtn" class="btn" type="button">Refresh recordings</button>
+    <input id="recordingSearch" placeholder="Search caller, number, website, transcript or lead" style="min-width:240px">
+    <input id="recordingStart" type="datetime-local" aria-label="Recordings from date">
+    <input id="recordingEnd" type="datetime-local" aria-label="Recordings to date">
+    <input id="recordingLeadType" placeholder="Lead type" style="width:150px">
+    <button id="recordingsSearchBtn" class="btn primary" type="button">Apply filters</button>
+    <button id="recordingsClearBtn" class="btn" type="button">Clear</button>
+    <button id="recordingsRefreshBtn" class="btn" type="button">Refresh</button>
     <button id="loadMoreRecordingsBtn" class="btn" type="button" hidden>Load more</button>
   </div>
   <div id="recordingsSummary" class="muted" style="margin-bottom:10px"></div>
   <div id="recordingsTable"></div>
 </div>
 </section>
-<section id="leadsView" hidden><div class="card"><h2>Leads</h2><div class="toolbar"><input id="leadSearch" placeholder="Search name, phone, email, company or lead ID" style="min-width:280px"><select id="leadChannel"><option value="">All channels</option><option value="phone_call">Calls</option><option value="form">Forms</option><option value="email">Email</option><option value="sms">SMS</option></select><select id="leadStatus"><option value="">All statuses</option><option value="new">New</option><option value="quoted">Quoted</option><option value="pending sale">Pending</option><option value="sale">Sale</option><option value="no sale">No sale</option></select><button id="leadSearchBtn" class="btn primary">Search</button><button id="leadClearBtn" class="btn">Clear</button></div><div id="leadsTable"></div></div></section>
-<section id="sitesView" hidden><div class="card"><h2>Websites & tracking</h2><div id="sitesTable"></div></div></section>
+<section id="leadsView" hidden><div class="card">
+  <div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">Leads</h2><p class="muted">Search every loaded channel and open a lead to review calls, summaries, messages and recordings.</p></div></div>
+  <div class="toolbar">
+    <input id="leadSearch" placeholder="Search name, phone, email, company or lead ID" style="min-width:240px">
+    <select id="leadChannel"><option value="">All channels</option><option value="phone_call">Calls</option><option value="form">Forms</option><option value="email">Email</option><option value="sms">SMS</option><option value="website">Website</option><option value="manual">Manual</option></select>
+    <select id="leadStatus"><option value="">All statuses</option><option value="new">New</option><option value="quoted">Quoted</option><option value="pending sale">Pending</option><option value="sale">Sale</option><option value="no sale">No sale</option></select>
+    <input id="leadStart" type="datetime-local" aria-label="Leads from date">
+    <input id="leadEnd" type="datetime-local" aria-label="Leads to date">
+    <button id="leadSearchBtn" class="btn primary">Apply filters</button><button id="leadClearBtn" class="btn">Clear</button>
+  </div>
+  <div id="leadsTable"></div>
+  <div class="toolbar" style="justify-content:center;margin-top:12px"><button id="loadMoreLeadsBtn" class="btn" type="button" hidden>Load more leads</button></div>
+</div></section>
+<section id="sitesView" hidden><div class="card"><h2>Websites & tracking</h2><p class="muted">This list is the Attribution registry. Automatic discovery across MainWP and Analog OS Portfolio, plus Google Search Console/GA4 SEO metrics, is not connected to this page yet; the detail view marks those sources as disconnected instead of inventing results.</p><div id="sitesTable"></div></div></section>
 <section id="numbersView" hidden>
 <div class="card">
 <div class="top" style="margin-bottom:14px"><div><h2 style="margin:0">Numbers & routing</h2><p class="muted">Tracking → Forwarding → Destination.</p></div><div class="actions"><button id="addForwardingBtn" class="btn" type="button">Add forwarding number</button><button id="addNumberBtn" class="btn primary" type="button">Add tracking number(s)</button></div></div>
@@ -135,7 +167,22 @@ body::before{content:"";position:fixed;inset:0;z-index:-3;pointer-events:none;ba
 <div class="card" style="margin-top:14px"><div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">Forwarding number pool</h2><p class="muted">Analog-controlled numbers presented on the supplier-facing leg.</p></div></div><div id="forwardingTable"></div></div>
 </div>
 </section>
-<section id="systemView" hidden><div class="content-grid"><div class="card"><h2>Jobs</h2><div id="jobs"></div></div><div class="card"><h2>Analog OS outbox</h2><div id="outbox"></div></div></div><div class="content-grid" style="margin-top:14px"><div class="card"><h2>Jobs by type and status</h2><div id="jobsByType"></div></div><div class="card"><h2>Dead-letter diagnosis</h2><p class="muted">Redacted error categories only; no customer details.</p><div id="deadLetterSummary"></div></div></div></section><section id="reportsView" hidden><div class="card"><h2>Reports</h2><div class="toolbar"><input id="reportStart" type="datetime-local"><input id="reportEnd" type="datetime-local"><a id="reportCsv" class="btn" href="/v1/dashboard/reports.csv">Download CSV</a><a id="reportPdf" class="btn primary" href="/v1/dashboard/reports.pdf">Download branded PDF</a></div><div id="reportPreview" class="muted">Choose a date range and use the download buttons.</div></div></section>
+<section id="systemView" hidden>
+  <div class="card"><div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">Integration status</h2><p class="muted">Configured / missing indicators only. Secrets are never shown here.</p></div><button id="refreshSystemBtn" class="btn" type="button">Refresh status</button></div><div id="integrations"></div></div>
+  <div class="content-grid" style="margin-top:14px"><div class="card"><h2>Jobs</h2><div id="jobs"></div></div><div class="card"><h2>Analog OS outbox</h2><div id="outbox"></div></div></div>
+  <div class="content-grid" style="margin-top:14px"><div class="card"><h2>Jobs by type and status</h2><div id="jobsByType"></div></div><div class="card"><h2>Dead-letter diagnosis</h2><p class="muted">Redacted error categories only; no customer details.</p><div id="deadLetterSummary"></div></div></div>
+  <div class="card" style="margin-top:14px"><h2>Recent system log</h2><p class="muted">Audit events, with identifiers and action names only.</p><div id="systemLogs"></div></div>
+</section><section id="reportsView" hidden><div class="card">
+  <div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">Reports</h2><p class="muted">Select a period, review the preview, then export, print or prepare an email.</p></div></div>
+  <div class="toolbar"><label class="muted">From <input id="reportStart" type="datetime-local"></label><label class="muted">To <input id="reportEnd" type="datetime-local"></label>
+    <button id="reportRefreshBtn" class="btn" type="button">Refresh preview</button>
+    <a id="reportCsv" class="btn" href="/v1/dashboard/reports.csv">Download CSV</a>
+    <a id="reportPdf" class="btn primary" href="/v1/dashboard/reports.pdf">Download branded PDF</a>
+    <button id="reportPrintBtn" class="btn" type="button">Print preview</button>
+    <button id="reportEmailBtn" class="btn" type="button">Prepare email</button>
+  </div>
+  <div id="reportPreview" class="muted">Choose a date range and refresh the preview.</div>
+</div></section>
 </main>
 </div>
 <div id="numberEditorModal" class="modal"><div class="modal-box" style="max-width:680px"><div class="modal-head"><div><h2 id="numberEditorTitle" style="margin:0">Add tracking number(s)</h2><div class="muted">Create the inventory record and attach it to a website and supplier destination.</div></div><button id="closeNumberEditor" class="btn" type="button">Close</button></div><div class="modal-body" style="display:block"><form id="numberForm">
@@ -159,11 +206,30 @@ body::before{content:"";position:fixed;inset:0;z-index:-3;pointer-events:none;ba
 <div id="modal" class="modal"><div class="modal-box"><div class="modal-head"><div><h2 id="modalTitle" style="margin:0">Call</h2><div id="modalMeta" class="muted"></div></div><button id="closeModal" class="btn">Close</button></div><div id="modalBody" class="modal-body"></div></div></div>
 <div id="toast" class="toast"></div>
 <script>
-const state={siteId:"",summary:null,calls:[],recordings:[],recordingsHasMore:false,leads:[],sites:[],numbers:[],system:null,leadFlow:null,auth0Enabled:false,user:null};
+const state={siteId:"",summary:null,calls:[],callsHasMore:false,recordings:[],recordingsHasMore:false,leads:[],leadsHasMore:false,sites:[],numbers:[],system:null,leadFlow:null,auth0Enabled:false,user:null,reportPreview:null};
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>c==="&"?"&amp;":c==="<"?"&lt;":c===">"?"&gt;":"&quot;");
 const fmtDate=s=>s?new Date(s).toLocaleString():"—";
 const fmtDur=n=>{n=Number(n||0);if(!n)return"0:00";return Math.floor(n/60)+":"+String(Math.floor(n%60)).padStart(2,"0")};
+function phoneActions(value){
+  const raw=String(value||"").trim();
+  const number=raw.replace(/[^\d+*#]/g,"");
+  if(!number||!/[0-9]/.test(number))return "";
+  const href=esc(number);
+  return '<span class="phone-actions"><a data-phone-action href="tel:'+href+'">Call</a> · <a data-phone-action href="sms:'+href+'">SMS</a></span>';
+}
+function attachPhoneActionHandlers(root){
+  (root||document).querySelectorAll("[data-phone-action]").forEach(a=>a.onclick=e=>e.stopPropagation());
+}
+function dateParam(value){
+  if(!value)return "";
+  const parsed=new Date(value);
+  return Number.isNaN(parsed.getTime())?"":parsed.toISOString();
+}
+function addDateParam(params,selector,key){
+  const value=dateParam($(selector)?.value||"");
+  if(value)params.set(key,value);
+}
 function status(value){const v=String(value??"").toLowerCase();const cls=v.includes("complete")||v.includes("stored")||v.includes("attribut")?"green":v.includes("pending")||v.includes("ready")?"amber":v.includes("failed")||v.includes("dead")?"red":"blue";return '<span class="status '+cls+'"><i class="dot"></i>'+esc(value||"unknown")+"</span>"}
 async function api(path,opts){const r=await fetch(path,opts);if(r.status===401){showLogin();throw Error("auth")}const j=await r.json();if(!r.ok)throw Error(j.error||"request_failed");return j}
 function showLogin(){state.authed=false;$("#login").hidden=false;$("#app").hidden=true}
@@ -173,30 +239,69 @@ function setupAuthUi(){const enabled=state.auth0Enabled;$("#auth0Actions").hidde
 async function login(e){e.preventDefault();$("#loginError").textContent="";try{const r=await fetch("/v1/dashboard/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({username:$("#username").value,password:$("#password").value})});const j=await r.json().catch(()=>({}));if(r.status===401){$("#loginError").textContent="Invalid username or password.";return}if(!r.ok)throw Error(j.error||"login_failed");showApp();try{await loadAll()}catch(err){if(err?.message==="auth"){$("#loginError").textContent="Your session could not be established. Please sign in again.";showLogin();}}}
 catch(err){$("#loginError").textContent=err?.message==="login_failed"?"Could not sign in right now.":"Could not reach the dashboard authentication service."}}
 async function logout(){if(state.auth0Enabled){window.location.href="/auth/logout";return}await api("/v1/dashboard/logout",{method:"POST"}).catch(()=>{});showLogin()}
-async function loadAll(){const q=state.siteId?("?siteId="+encodeURIComponent(state.siteId)):"";const [summary,calls,leads,sites,numbers,system,leadFlow,recordings]=await Promise.allSettled([api("/v1/dashboard/summary"+q),api("/v1/dashboard/calls?limit=50"+q),api("/v1/dashboard/leads?limit=50"+q),api("/v1/dashboard/sites"),api("/v1/dashboard/numbers"+q),api("/v1/dashboard/system"),api("/v1/dashboard/lead-flow"+q),api("/v1/dashboard/recordings?limit=50"+q)]);if(summary.status==="fulfilled")state.summary=summary.value;if(calls.status==="fulfilled")state.calls=calls.value.calls;if(leads.status==="fulfilled")state.leads=leads.value.leads;if(sites.status==="fulfilled")state.sites=sites.value.sites;if(numbers.status==="fulfilled")state.numbers=numbers.value.numbers;if(system.status==="fulfilled")state.system=system.value;if(leadFlow.status==="fulfilled")state.leadFlow=leadFlow.value;if(recordings.status==="fulfilled"){state.recordings=recordings.value.recordings||[];state.recordingsHasMore=!!recordings.value.hasMore}populateSites();render();const failures=[summary,calls,leads,sites,numbers,system,leadFlow,recordings].filter(x=>x.status==="rejected");if(failures.length&&failures.some(x=>x.reason?.message==="auth")){showLogin();throw Error("auth")}if(failures.length)toast("Some dashboard data is unavailable")}
+async function loadAll(){
+  const base=new URLSearchParams();
+  if(state.siteId)base.set("siteId",state.siteId);
+  base.set("limit","50");base.set("offset","0");
+  const query=base.toString();
+  const [summary,calls,leads,sites,numbers,system,leadFlow,recordings]=await Promise.allSettled([
+    api("/v1/dashboard/summary"+(state.siteId?"?siteId="+encodeURIComponent(state.siteId):"")),
+    api("/v1/dashboard/calls?"+query),
+    api("/v1/dashboard/leads?limit=50"+(state.siteId?"&siteId="+encodeURIComponent(state.siteId):"")),
+    api("/v1/dashboard/sites"),
+    api("/v1/dashboard/numbers"+(state.siteId?"?siteId="+encodeURIComponent(state.siteId):"")),
+    api("/v1/dashboard/system"),
+    api("/v1/dashboard/lead-flow"+(state.siteId?"?siteId="+encodeURIComponent(state.siteId):"")),
+    api("/v1/dashboard/recordings?"+query)
+  ]);
+  if(summary.status==="fulfilled")state.summary=summary.value;
+  if(calls.status==="fulfilled"){state.calls=calls.value.calls||[];state.callsHasMore=!!calls.value.hasMore;}
+  if(leads.status==="fulfilled"){state.leads=leads.value.leads||[];state.leadsHasMore=state.leads.length===50;}
+  if(sites.status==="fulfilled")state.sites=sites.value.sites||[];
+  if(numbers.status==="fulfilled")state.numbers=numbers.value.numbers||[];
+  if(system.status==="fulfilled")state.system=system.value;
+  if(leadFlow.status==="fulfilled")state.leadFlow=leadFlow.value;
+  if(recordings.status==="fulfilled"){state.recordings=recordings.value.recordings||[];state.recordingsHasMore=!!recordings.value.hasMore;}
+  populateSites();render();
+  const failures=[summary,calls,leads,sites,numbers,system,leadFlow,recordings].filter(x=>x.status==="rejected");
+  if(failures.length&&failures.some(x=>x.reason?.message==="auth")){showLogin();throw Error("auth")}
+  if(failures.length)toast("Some dashboard data is unavailable");
+  loadReportPreview().catch(()=>{});
+}
+
 function populateSites(){const select=$("#siteFilter");const current=select.value;select.innerHTML='<option value="">All websites</option>'+state.sites.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.name)+'</option>').join("");select.value=state.siteId||current||""}
 function renderLeadFlow(){const rows=state.leadFlow?.sites||[];const total=rows.reduce((n,r)=>n+Number(r.leads||0),0);const events=rows.reduce((n,r)=>n+Number(r.lead_events||0),0);const summary=$("#leadFlowSummary"),table=$("#leadFlowTable");if(!rows.length){summary.textContent="No diagnostic data";table.innerHTML='<div class="empty">No website activity in the last 7 days.</div>';return}const diagnosis=r=>{if(Number(r.visitors||0)===0)return"NO TRAFFIC";if(Number(r.page_views||0)===0)return"COLLECTOR BLOCKED";if(Number(r.lead_events||0)>Number(r.leads||0))return"LEAD CREATION GAP";if(Number(r.calls||0)>0&&Number(r.leads||0)===0)return"CALL LEAD GAP";if(Number(r.leads||0)>0)return"LEAD PATH LIVE";return"TRAFFIC — NO ENQUIRY"};summary.textContent=rows.length+" sites • "+events+" lead events • "+total+" leads";table.innerHTML='<div class="table-wrap"><table><thead><tr><th>Website</th><th>Visitors</th><th>Pages</th><th>Phone assign</th><th>Phone clicks</th><th>Lead events</th><th>Leads</th><th>Calls</th><th>Recovered</th><th>Diagnosis</th></tr></thead><tbody>'+rows.map(r=>'<tr><td><b>'+esc(r.name)+'</b><br><span class="muted">'+esc(r.hostname)+'</span></td><td>'+r.visitors+'</td><td>'+r.page_views+'</td><td>'+r.number_assignments+'</td><td>'+r.phone_clicks+'</td><td>'+r.lead_events+'</td><td>'+r.leads+'</td><td>'+r.calls+'</td><td>'+r.recovered_leads+'</td><td>'+status(diagnosis(r))+'</td></tr>').join("")+'</tbody></table></div>'}
 function render(){const s=state.summary?.summary||{};$("#metrics").innerHTML=[["Websites",state.sites.length,"Registered websites"],["Calls",s.total_calls,"30-day window"],["Answered",s.answered_calls,"Duration > 0"],["Missed",s.missed_calls,"No duration"],["Attributed",s.attributed_calls,"Linked to a lead"],["Recordings",s.recordings,"Stored in R2"],["Transcripts",s.transcripts,"Completed"]].map(x=>'<div class="card metric"><div class="label">'+x[0]+'</div><div class="value">'+(x[1]??0)+'</div><div class="hint">'+x[2]+'</div></div>').join("");const trend=state.summary?.trend||[];const max=Math.max(1,...trend.map(x=>Number(x.calls)||0));$("#trend").innerHTML=trend.map(d=>'<div class="bar" style="height:'+Math.max(8,(Number(d.calls)||0)/max*130)+'px"><b>'+d.calls+'</b><span>'+d.day.slice(5)+'</span></div>').join("");$("#health").innerHTML='<div style="display:grid;gap:10px">'+[["Avg call duration",fmtDur(s.avg_call_duration)],["Leads (30d)",state.summary?.leads?.total||0],["Jobs",JSON.stringify(state.system?.jobs||[])],["OS outbox",JSON.stringify(state.system?.analog_os_outbox||[])]] .map(x=>'<div><div class="muted" style="font-size:11px">'+x[0]+'</div><strong>'+esc(x[1])+'</strong></div>').join("")+"</div>";renderCalls($("#recentCalls"),state.calls.slice(0,10));renderCalls($("#callsTable"),state.calls);renderRecordings();renderLeads();renderLeadFlow();renderSites();renderNumbers();renderSystem()}
-function renderCalls(el,rows){if(!rows.length){el.innerHTML='<div class="empty">No calls found.</div>';return}el.innerHTML='<div class="table-wrap"><table><thead><tr><th>Time</th><th>Website</th><th>Caller</th><th>Duration</th><th>Lead</th><th>Recording</th><th>AI</th></tr></thead><tbody>'+rows.map(c=>'<tr data-call="'+esc(c.id)+'" class="call-row clickable"><td>'+fmtDate(c.started_at||c.created_at)+'</td><td>'+esc(c.site_name)+'</td><td>'+esc(c.caller_number||"Unknown")+'</td><td>'+fmtDur(c.duration_seconds)+'</td><td>'+status(c.lead_id?"attributed":"unattributed")+'</td><td>'+status(c.recording_status)+'</td><td>'+status(c.outcome||c.transcript_status)+'</td></tr>').join("")+"</tbody></table></div>";el.querySelectorAll(".call-row").forEach(r=>r.onclick=()=>openCall(r.dataset.call))}
+function renderCalls(el,rows){
+  if(!rows.length){el.innerHTML='<div class="empty">No calls found. Try a wider date range or clear the filters.</div>';if(el.id==="callsTable")$("#callsLoadMoreBtn").hidden=true;return;}
+  el.innerHTML='<div class="table-wrap"><table><thead><tr><th>Time</th><th>Website</th><th>Caller</th><th>Duration</th><th>Lead / type</th><th>Recording</th><th>AI summary</th><th>Provider</th></tr></thead><tbody>'+
+    rows.map(c=>'<tr data-call="'+esc(c.id)+'" class="call-row clickable"><td>'+fmtDate(c.started_at||c.created_at)+'</td><td>'+esc(c.site_name||"Unknown site")+'<br><span class="muted">'+esc(c.hostname||"")+'</span></td><td>'+esc(c.caller_number||"Unknown")+'<br>'+phoneActions(c.caller_number)+'</td><td>'+fmtDur(c.duration_seconds)+'</td><td>'+status(c.lead_id?"attributed":"unattributed")+'<br><span class="muted">Lead '+esc(c.lead_id?String(c.lead_id).slice(0,8):"—")+' • '+esc(c.lead_type||c.intent||c.service_type||"—")+'</span></td><td>'+status(c.recording_status)+'</td><td>'+esc(c.summary||c.outcome||c.transcript_status||"—")+'</td><td>'+esc(c.provider||"—")+'</td></tr>').join("")+
+    "</tbody></table></div>";
+  el.querySelectorAll(".call-row").forEach(r=>r.onclick=()=>openCall(r.dataset.call));
+  attachPhoneActionHandlers(el);
+  if(el.id==="callsTable")$("#callsLoadMoreBtn").hidden=!state.callsHasMore;
+}
+
+
 function renderRecordings(){
   const el=$("#recordingsTable");
   const all=state.recordings||[];
   const q=($("#recordingSearch")?.value||"").trim().toLowerCase();
-  const rows=all.filter(r=>!q||[r.site_name,r.hostname,r.caller_number,r.called_number].some(v=>String(v||"").toLowerCase().includes(q)));
+  const rows=all.filter(r=>!q||[r.id,r.lead_id,r.site_name,r.hostname,r.caller_number,r.called_number,r.customer_name,r.summary,r.lead_type].some(v=>String(v||"").toLowerCase().includes(q)));
   $("#recordingsSummary").textContent=all.length
-    ? (all.length+" archived recording(s) loaded"+(state.recordingsHasMore?"; load more to browse older calls":"")+". Search filters the loaded recordings.")
-    : "No archived recordings are available yet.";
+    ? (all.length+" recording(s) in this filtered page"+(state.recordingsHasMore?"; more matching recordings are available":"")+". Use website/date/lead-type filters to narrow the library.")
+    : "No archived recordings matched these filters.";
   $("#loadMoreRecordingsBtn").hidden=!state.recordingsHasMore;
-  if(!rows.length){
-    el.innerHTML='<div class="empty">'+(all.length?"No recordings match that search.":"Recordings will appear here after calls have been recorded and archived.")+'</div>';
-    return;
-  }
-  el.innerHTML='<div class="table-wrap"><table><thead><tr><th>Time</th><th>Website</th><th>Caller</th><th>Duration</th><th>Transcript</th><th>Recording</th></tr></thead><tbody>'+
-    rows.map(r=>'<tr><td>'+fmtDate(r.started_at||r.created_at)+'</td><td><b>'+esc(r.site_name||"Unknown site")+'</b><br><span class="muted">'+esc(r.hostname||"")+'</span></td><td>'+esc(r.caller_number||"Unknown")+'</td><td>'+fmtDur(r.duration_seconds)+'</td><td>'+status(r.transcript_status||"not started")+'</td><td><div class="toolbar" style="margin:0"><button class="btn primary" type="button" data-recording-play="'+esc(r.id)+'">Play</button><button class="btn" type="button" data-recording-details="'+esc(r.id)+'">Details</button></div></td></tr><tr><td colspan="6"><div id="recordingPlayer-'+esc(r.id)+'" class="recording-player" data-recording-player="'+esc(r.id)+'" hidden></div></td></tr>').join("")+
+  if(!rows.length){el.innerHTML='<div class="empty">'+(all.length?"No recordings match that search.":"No archived recordings are available for this selection.")+'</div>';return;}
+  el.innerHTML='<div class="table-wrap"><table><thead><tr><th>Time</th><th>Website</th><th>Caller</th><th>Duration</th><th>Lead type</th><th>Transcript</th><th>Recording</th></tr></thead><tbody>'+
+    rows.map(r=>'<tr><td>'+fmtDate(r.started_at||r.created_at)+'</td><td><b>'+esc(r.site_name||"Unknown site")+'</b><br><span class="muted">'+esc(r.hostname||"")+'</span></td><td>'+esc(r.caller_number||"Unknown")+'<br>'+phoneActions(r.caller_number)+'</td><td>'+fmtDur(r.duration_seconds)+'</td><td>'+esc(r.lead_type||"—")+'</td><td>'+status(r.transcript_status||"not started")+'</td><td><div class="toolbar" style="margin:0"><button class="btn primary" type="button" data-recording-play="'+esc(r.id)+'">Play</button><button class="btn" type="button" data-recording-details="'+esc(r.id)+'">Details</button></div></td></tr><tr><td colspan="7"><div id="recordingPlayer-'+esc(r.id)+'" class="recording-player" data-recording-player="'+esc(r.id)+'" hidden></div></td></tr>').join("")+
     "</tbody></table></div>";
   el.querySelectorAll("[data-recording-play]").forEach(button=>button.onclick=()=>playRecording(button.dataset.recordingPlay));
   el.querySelectorAll("[data-recording-details]").forEach(button=>button.onclick=()=>openCall(button.dataset.recordingDetails));
+  attachPhoneActionHandlers(el);
 }
+
+
 async function playRecording(id){
   const host=document.getElementById("recordingPlayer-"+id);
   if(!host)return;
@@ -216,22 +321,56 @@ async function playRecording(id){
     host.innerHTML='<span class="muted">Recording could not be loaded: '+esc(error?.message||"Request failed")+'</span>';
   }
 }
+function buildRecordingsParams(offset=0){
+  const p=new URLSearchParams({limit:"50",offset:String(offset)});
+  if(state.siteId)p.set("siteId",state.siteId);
+  const q=$("#recordingSearch").value.trim();
+  if(q)p.set("q",q);
+  addDateParam(p,"#recordingStart","start");addDateParam(p,"#recordingEnd","end");
+  const type=$("#recordingLeadType").value.trim();if(type)p.set("leadType",type);
+  return p;
+}
+async function searchRecordings(append=false){
+  const button=$("#recordingsSearchBtn");if(button)button.disabled=true;
+  try{
+    const offset=append?state.recordings.length:0;
+    const page=await api("/v1/dashboard/recordings?"+buildRecordingsParams(offset).toString());
+    state.recordings=append?state.recordings.concat(page.recordings||[]):(page.recordings||[]);
+    state.recordingsHasMore=!!page.hasMore;renderRecordings();
+  }finally{if(button)button.disabled=false;}
+}
 async function loadMoreRecordings(){
   if(!state.recordingsHasMore)return;
-  const button=$("#loadMoreRecordingsBtn");
-  button.disabled=true;
-  try{
-    const params=new URLSearchParams({limit:"50",offset:String(state.recordings.length)});
-    if(state.siteId)params.set("siteId",state.siteId);
-    const page=await api("/v1/dashboard/recordings?"+params.toString());
-    state.recordings=state.recordings.concat(page.recordings||[]);
-    state.recordingsHasMore=!!page.hasMore;
-    renderRecordings();
-  }catch(error){toast(error?.message||"Could not load older recordings")}
-  finally{button.disabled=false}
+  const button=$("#loadMoreRecordingsBtn");button.disabled=true;
+  try{await searchRecordings(true);}catch(error){toast(error?.message||"Could not load older recordings");}
+  finally{button.disabled=false;}
 }
-function renderLeads(){const el=$("#leadsTable"),rows=state.leads;if(!rows.length){el.innerHTML='<div class="empty">No leads found.</div>';return}el.innerHTML='<div class="table-wrap"><table><thead><tr><th>Created</th><th>Website</th><th>Customer</th><th>Company</th><th>Source</th><th>Service</th><th>Calls</th><th>Status</th></tr></thead><tbody>'+rows.map(l=>'<tr><td>'+fmtDate(l.created_at)+'</td><td>'+esc(l.site_name)+'</td><td>'+esc(l.customer_name||l.customer_phone||"Unknown")+'</td><td>'+esc(l.company_name||"—")+'</td><td>'+esc(l.source)+'</td><td>'+esc(l.service_type||"—")+'</td><td>'+l.call_count+'</td><td>'+status(l.status)+'</td></tr>').join("")+"</tbody></table></div>"}
-function renderSites(){const el=$("#sitesTable"),rows=state.sites;if(!rows.length){el.innerHTML='<div class="empty">No sites registered.</div>';return}el.innerHTML='<div class="table-wrap"><table><thead><tr><th>Website</th><th>Hostname</th><th>Status</th><th>Suppliers</th><th>Tracking numbers</th><th>Calls</th><th>Leads</th></tr></thead><tbody>'+rows.map(s=>'<tr><td>'+esc(s.name)+'</td><td>'+esc(s.hostname)+'</td><td>'+status(s.status)+'</td><td>'+s.supplier_count+'</td><td>'+s.tracking_numbers+'</td><td>'+s.total_calls+'</td><td>'+s.total_leads+'</td></tr>').join("")+"</tbody></table></div>"}
+
+
+function renderLeads(){
+  const el=$("#leadsTable"),rows=state.leads;
+  if(!rows.length){el.innerHTML='<div class="empty">No leads found. Try a wider date range or clear filters.</div>';$("#loadMoreLeadsBtn").hidden=true;return;}
+  el.innerHTML='<div class="table-wrap"><table><thead><tr><th>Created</th><th>Lead ID</th><th>Website</th><th>Customer</th><th>Company</th><th>Source</th><th>Service / type</th><th>Calls</th><th>Status</th></tr></thead><tbody>'+
+    rows.map(l=>'<tr data-lead="'+esc(l.id)+'" class="clickable"><td>'+fmtDate(l.created_at)+'</td><td><span class="muted">'+esc(String(l.id||"").slice(0,8))+'</span></td><td>'+esc(l.site_name||"")+'</td><td>'+esc(l.customer_name||l.customer_phone||"Unknown")+'<br>'+phoneActions(l.customer_phone)+'</td><td>'+esc(l.company_name||"—")+'</td><td>'+esc(l.source||"—")+'</td><td>'+esc(l.service_type||l.lead_type||"—")+'</td><td>'+Number(l.call_count||0)+'</td><td>'+status(l.status)+'</td></tr>').join("")+
+    "</tbody></table></div>";
+  el.querySelectorAll("[data-lead]").forEach(r=>r.onclick=()=>openLead(r.dataset.lead));
+  attachPhoneActionHandlers(el);
+  $("#loadMoreLeadsBtn").hidden=!state.leadsHasMore;
+}
+
+
+function renderSites(){
+  const el=$("#sitesTable"),rows=state.sites;
+  if(!rows.length){el.innerHTML='<div class="empty">No sites registered in Attribution.</div>';return;}
+  el.innerHTML='<div class="table-wrap"><table><thead><tr><th>Website</th><th>Hostname</th><th>Status</th><th>Suppliers</th><th>Tracking numbers</th><th>Calls</th><th>Leads</th><th>30-day activity</th></tr></thead><tbody>'+
+    rows.map(s=>'<tr data-site="'+esc(s.id)+'" class="clickable"><td><b>'+esc(s.name)+'</b></td><td><a href="https://'+esc(s.hostname)+'" target="_blank" rel="noopener" data-phone-action>'+esc(s.hostname)+'</a></td><td>'+status(s.status)+'</td><td>'+Number(s.supplier_count||0)+'</td><td>'+Number(s.tracking_numbers||0)+'</td><td>'+Number(s.total_calls||0)+'</td><td>'+Number(s.total_leads||0)+'</td><td><button class="btn" type="button" data-site-open="'+esc(s.id)+'">Performance</button></td></tr>').join("")+
+    "</tbody></table></div>";
+  el.querySelectorAll("[data-site]").forEach(r=>r.onclick=()=>openSite(r.dataset.site));
+  el.querySelectorAll("[data-site-open]").forEach(b=>b.onclick=e=>{e.stopPropagation();openSite(b.dataset.siteOpen);});
+  el.querySelectorAll("a[data-phone-action]").forEach(a=>a.onclick=e=>e.stopPropagation());
+}
+
+
 function renderNumbers(){
 const rows=state.numbers;
 const active=rows.filter(n=>n.active).length;
@@ -325,18 +464,28 @@ try{await api("/v1/dashboard/numbers/"+encodeURIComponent(id),{method:"DELETE"})
 catch(error){toast(error.message||"Tracking number could not be deleted.");}}
 
 function renderSystem(){
-const j=state.system||{};
-$("#jobs").innerHTML=(j.jobs||[]).map(x=>'<div class="pill">'+esc(x.status)+": "+x.count+"</div>").join("")||'<div class="muted">No jobs.</div>';
-$("#outbox").innerHTML=(j.analog_os_outbox||[]).map(x=>'<div class="pill">'+esc(x.status)+": "+x.count+"</div>").join("")||'<div class="muted">No events.</div>';
-const byType=j.jobs_by_type||[];
-$("#jobsByType").innerHTML=byType.length
-?'<div class="table-wrap"><table><thead><tr><th>Job type</th><th>Status</th><th>Count</th></tr></thead><tbody>'+byType.map(x=>'<tr><td>'+esc(x.job_type)+'</td><td>'+esc(x.status)+'</td><td>'+esc(x.count)+'</td></tr>').join("")+'</tbody></table></div>'
-:'<div class="empty">No jobs.</div>';
-const dead=j.dead_letter_summary||[];
-$("#deadLetterSummary").innerHTML=dead.length
-?'<div class="table-wrap"><table><thead><tr><th>Job type</th><th>Failure category</th><th>Count</th><th>Oldest</th><th>Latest</th></tr></thead><tbody>'+dead.map(x=>'<tr><td>'+esc(x.job_type)+'</td><td>'+esc(x.error_category)+'</td><td>'+esc(x.count)+'</td><td>'+fmtDate(x.oldest_updated_at)+'</td><td>'+fmtDate(x.latest_updated_at)+'</td></tr>').join("")+'</tbody></table></div>'
-:'<div class="empty">No dead-letter jobs.</div>';
+  const j=state.system||{};
+  $("#jobs").innerHTML=(j.jobs||[]).map(x=>'<div class="pill">'+esc(x.status)+": "+Number(x.count||0)+"</div>").join("")||'<div class="muted">No jobs.</div>';
+  $("#outbox").innerHTML=(j.analog_os_outbox||[]).map(x=>'<div class="pill">'+esc(x.status)+": "+Number(x.count||0)+"</div>").join("")||'<div class="muted">No events.</div>';
+  const byType=j.jobs_by_type||[];
+  $("#jobsByType").innerHTML=byType.length
+    ? '<div class="table-wrap"><table><thead><tr><th>Job type</th><th>Status</th><th>Count</th></tr></thead><tbody>'+byType.map(x=>'<tr><td>'+esc(x.job_type)+'</td><td>'+status(x.status)+'</td><td>'+Number(x.count||0)+'</td></tr>').join("")+'</tbody></table></div>'
+    : '<div class="empty">No jobs.</div>';
+  const dead=j.dead_letter_summary||[];
+  $("#deadLetterSummary").innerHTML=dead.length
+    ? '<div class="table-wrap"><table><thead><tr><th>Job type</th><th>Failure category</th><th>Count</th><th>Oldest</th><th>Latest</th></tr></thead><tbody>'+dead.map(x=>'<tr><td>'+esc(x.job_type)+'</td><td>'+esc(x.error_category)+'</td><td>'+Number(x.count||0)+'</td><td>'+fmtDate(x.oldest_updated_at)+'</td><td>'+fmtDate(x.latest_updated_at)+'</td></tr>').join("")+'</tbody></table></div>'
+    : '<div class="empty">No dead-letter jobs.</div>';
+  const integrations=j.integrations||[];
+  $("#integrations").innerHTML=integrations.length
+    ? '<div class="table-wrap"><table><thead><tr><th>Integration</th><th>Status</th><th>Detail</th></tr></thead><tbody>'+integrations.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+status(x.status)+'</td><td>'+esc(x.detail||"")+'</td></tr>').join("")+'</tbody></table></div>'
+    : '<div class="empty">Integration status unavailable.</div>';
+  const logs=j.audit_log||[];
+  $("#systemLogs").innerHTML=logs.length
+    ? '<div class="table-wrap"><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Entity</th><th>Entity ID</th></tr></thead><tbody>'+logs.map(x=>'<tr><td>'+fmtDate(x.created_at)+'</td><td>'+esc(x.actor_type||"—")+' '+esc(x.actor_id||"")+'</td><td>'+esc(x.action||"—")+'</td><td>'+esc(x.entity_type||"—")+'</td><td>'+esc(x.entity_id||"—")+'</td></tr>').join("")+'</tbody></table></div>'
+    : '<div class="empty">No audit log entries returned.</div>';
 }
+
+
 function renderAnalogOSContext(record){
   if(!record)return '<div class="block"><b>Historical Analog OS context</b><p class="muted">No unique historical record matched this call using the exact caller number and website or tracking-number route. This panel is read-only; it does not import a lead or contact a supplier.</p></div>';
   const p=record.payload&&typeof record.payload==="object"?record.payload:{};
@@ -346,16 +495,170 @@ function renderAnalogOSContext(record){
 }async function openCall(id){try{const x=await api("/v1/dashboard/calls/"+encodeURIComponent(id));$("#modalTitle").textContent=x.call.caller_number||"Call";$("#modalMeta").textContent=(x.call.site_name||"Unknown site")+" • "+fmtDate(x.call.started_at)+" • "+fmtDur(x.call.duration_seconds);const recording=x.recording?.url?'<audio class="recording" controls src="'+esc(x.recording.url)+'"></audio><div class="muted">Recording link expires in 15 minutes.</div>':'<div class="muted">Recording not archived.</div>';
 const route='<div class="block"><b>Three-number route</b><p>Tracking: '+esc(x.call.tracking_number||x.call.called_number||"Not resolved")+'<br>Forwarding: '+esc(x.call.forwarding_number||"Not configured")+'<br>Destination: '+esc(x.call.destination_number||"Not configured")+'</p></div>';const intel=x.intelligence?'<div><b>Summary</b><p>'+esc(x.intelligence.summary||"—")+'</p><div>'+["intent","buying_stage","urgency","sentiment","outcome"].map(k=>'<span class="pill">'+k+": "+esc(x.intelligence[k]||"—")+"</span>").join("")+'</div><p><b>Next action:</b> '+esc(x.intelligence.next_action||"—")+'</p></div>':'<div class="muted">AI intelligence not completed.</div>';const tx=x.transcript?'<pre>'+esc(x.transcript.full_text||"")+"</pre>":'<div class="muted">Transcript not completed.</div>';const osContext=renderAnalogOSContext(x.analog_os_context);$("#modalBody").innerHTML='<div style="display:grid;gap:12px"><div class="block"><b>Call</b><p>'+esc(x.call.direction||"unknown")+' • '+esc(x.call.called_number||"")+'</p><p>Attribution: '+status(x.call.attribution_method||"none")+'</p>'+recording+route+'</div><div class="block"><b>Transcript</b>'+tx+'</div></div><div style="display:grid;gap:12px"><div class="block"><b>AI intelligence</b>'+intel+'</div><div class="block"><b>Lead</b><p>'+esc(x.lead?.customer_name||"Unknown")+'</p><p>'+esc(x.lead?.customer_phone||"")+'<br>'+esc(x.lead?.customer_email||"")+'</p><p>'+esc(x.lead?.service_type||"")+'</p></div>'+osContext+'</div>';renderTransferPanel(x.call);$("#modal").classList.add("open")}catch(err){toast("Could not open call")}}
 async function renderTransferPanel(call){const host=$("#modalBody");const old=$("#transferPanel");if(old)old.remove();if(call.provider==="twilio"&&(!call.conference_name||!call.operator_call_sid)){const automatic=document.createElement("div");automatic.id="transferPanel";automatic.className="block";automatic.style.gridColumn="1 / -1";automatic.innerHTML="<b>Automatic supplier routing</b><p>This call is sent directly to the primary supplier. If it is not answered, the platform tries the next active ranked supplier automatically.</p>";host.prepend(automatic);return;}const panel=document.createElement("div");panel.id="transferPanel";panel.className="block";panel.style.gridColumn="1 / -1";panel.innerHTML="<b>Supplier transfer</b><div class=\"toolbar\"><select id=\"transferMode\"><option value=\"blind\">Blind transfer</option><option value=\"warm\">Warm / attended</option></select><span id=\"transferStatus\" class=\"muted\">Loading suppliers…</span></div><div id=\"supplierButtons\" class=\"toolbar\"></div>";host.prepend(panel);try{const data=await api("/v1/dashboard/suppliers?siteId="+encodeURIComponent(call.site_id));const box=$("#supplierButtons");const suppliers=data.suppliers||[];if(!suppliers.length){box.innerHTML="<span class=\"muted\">No ranked suppliers are configured for this website.</span>";return}box.innerHTML=suppliers.map(s=>"<button class=\"btn\" data-supplier=\""+esc(s.id)+"\">"+esc("Transfer #"+s.rank+" — "+s.name)+"</button>").join("");box.querySelectorAll("[data-supplier]").forEach(b=>b.onclick=async()=>{const id=b.dataset.supplier;$("#transferStatus").textContent="Connecting…";box.querySelectorAll("button").forEach(x=>x.disabled=true);try{const result=await api("/v1/telephony/calls/"+encodeURIComponent(call.id)+"/transfer",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({supplier_id:id,mode:$("#transferMode").value})});$("#transferStatus").textContent="Transfer initiated ("+(result.attempt_id||"logged")+")";}catch(error){$("#transferStatus").textContent=String(error.message||"Transfer failed");}finally{box.querySelectorAll("button").forEach(x=>x.disabled=false)}});$("#transferStatus").textContent=suppliers.length+" ranked suppliers ready.";}catch(error){$("#transferStatus").textContent="Supplier list unavailable.";}}
-function switchView(view){for(const name of ["overview","calls","recordings","leads","sites","numbers","system","reports"])$("#"+name+"View").hidden=name!==view;$("#pageTitle").textContent=view[0].toUpperCase()+view.slice(1);document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("active",b.dataset.view===view))}
-async function searchLeads(){const p=new URLSearchParams();const q=$("#leadSearch").value.trim();if(q)p.set("q",q);if($("#leadChannel").value)p.set("channel",$("#leadChannel").value);if($("#leadStatus").value)p.set("status",$("#leadStatus").value);if(state.siteId)p.set("siteId",state.siteId);p.set("limit","100");const r=await api("/v1/dashboard/leads/search?"+p.toString());state.leads=r.leads||[];renderLeads()}
-function updateReportLinks(){const start=$("#reportStart").value,end=$("#reportEnd").value;const qs=new URLSearchParams();if(start)qs.set("start",new Date(start).toISOString());if(end)qs.set("end",new Date(end).toISOString());$("#reportCsv").href="/v1/dashboard/reports.csv?"+qs.toString();$("#reportPdf").href="/v1/dashboard/reports.pdf?"+qs.toString();}
-function bind(){$("#loginForm").onsubmit=login;$("#legacyToggle").onclick=()=>{$("#loginForm").hidden=!$("#loginForm").hidden};$("#logoutBtn").onclick=logout;$("#refreshBtn").onclick=()=>loadAll().then(()=>toast("Dashboard refreshed"));$("#closeModal").onclick=()=>$("#modal").classList.remove("open");$("#modal").onclick=e=>{if(e.target.id==="modal")$("#modal").classList.remove("open")};$("#siteFilter").onchange=e=>{state.siteId=e.target.value;loadAll()};$("#recordingSearch").oninput=renderRecordings;$("#recordingsRefreshBtn").onclick=()=>loadAll().then(()=>toast("Recordings refreshed")).catch(()=>toast("Could not refresh recordings"));$("#loadMoreRecordingsBtn").onclick=loadMoreRecordings;document.querySelectorAll(".nav button").forEach(b=>b.onclick=()=>switchView(b.dataset.view));$("#leadSearchBtn").onclick=()=>searchLeads().catch(()=>toast("Lead search failed"));$("#leadClearBtn").onclick=()=>{$("#leadSearch").value="";$("#leadChannel").value="";$("#leadStatus").value="";loadAll()};$("#reportStart").onchange=updateReportLinks;$("#reportEnd").onchange=updateReportLinks;
-$("#addNumberBtn").onclick=openNewNumberEditor;
-$("#closeNumberEditor").onclick=closeNumberEditor;
-$("#cancelNumberEditor").onclick=closeNumberEditor;
-$("#numberForm").onsubmit=saveNumber;
-$("#numberSite").onchange=()=>loadNumberDestinationOptions($("#numberSite").value);
-$("#numberEditorModal").onclick=e=>{if(e.target.id==="numberEditorModal")closeNumberEditor();};}
+async function openLead(id){
+  try{
+    const data=await api("/v1/dashboard/lead-details/"+encodeURIComponent(id));
+    const l=data.lead||{},calls=data.calls||[],messages=data.messages||[];
+    $("#modalTitle").textContent="Lead "+String(l.id||id).slice(0,8);
+    $("#modalMeta").textContent=(l.site_name||"Unknown website")+" • Created "+fmtDate(l.created_at);
+    const phone=phoneActions(l.customer_phone);
+    const facts=[["Lead ID",l.id],["Website",l.hostname||l.site_name],["Source / channel",l.source],["Status",l.status],["Outcome",l.outcome],["Customer",l.customer_name],["Company",l.company_name],["Phone",l.customer_phone],["Email",l.customer_email],["Service / lead type",l.service_type],["Summary",l.summary],["Assigned supplier",l.supplier],["Last updated",fmtDate(l.updated_at)]];
+    const factHtml=facts.filter(([,v])=>v!==null&&v!==undefined&&String(v).trim()!=="").map(([k,v])=>'<div><span class="muted">'+esc(k)+'</span><div>'+esc(v)+'</div></div>').join("");
+    const callHtml=calls.length?'<div class="table-wrap"><table><thead><tr><th>Time</th><th>Caller</th><th>Provider / lead type</th><th>Summary</th><th>Transcript</th><th>Recording</th><th>Details</th></tr></thead><tbody>'+calls.map(c=>'<tr><td>'+fmtDate(c.started_at||c.created_at)+'</td><td>'+esc(c.caller_number||l.customer_phone||"—")+'<br>'+phoneActions(c.caller_number||l.customer_phone)+'</td><td>'+esc(c.provider||"—")+'<br>'+esc(c.lead_type||c.intent||l.service_type||"—")+'</td><td>'+esc(c.summary||"—")+'</td><td><details><summary>View transcript</summary><pre>'+esc(c.transcript||"Transcript unavailable")+'</pre></details></td><td>'+(c.recording_url?'<audio class="recording" controls preload="metadata" src="'+esc(c.recording_url)+'"></audio><br><a href="'+esc(c.recording_url)+'" target="_blank" rel="noopener">Play / download</a><div class="muted">Link expires in 15 minutes.</div>':'<span class="muted">No archived recording</span>')+'</td><td><button class="btn" type="button" data-lead-call="'+esc(c.id)+'">Open call</button></td></tr>').join("")+'</tbody></table></div>':'<div class="empty">No calls are linked to this lead yet.</div>';
+    const messageHtml=messages.length?'<div class="table-wrap"><table><thead><tr><th>Time</th><th>Channel</th><th>Direction</th><th>Subject</th><th>Message</th></tr></thead><tbody>'+messages.map(m=>'<tr><td>'+fmtDate(m.created_at)+'</td><td>'+esc(m.channel)+'</td><td>'+esc(m.direction)+'</td><td>'+esc(m.subject||"—")+'</td><td>'+esc(m.body||"")+'</td></tr>').join("")+'</tbody></table></div>':'<div class="muted">No email/SMS/form message events are stored against this lead.</div>';
+    $("#modalBody").innerHTML='<div style="display:grid;gap:12px"><div class="block"><b>Lead profile</b><p>'+esc(l.customer_name||"Unknown customer")+'</p><p>'+esc(l.customer_phone||"")+' '+phone+'</p><p>'+esc(l.customer_email||"")+'</p><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">'+factHtml+'</div></div><div class="block"><b>Calls, summaries, transcripts and recordings</b>'+callHtml+'</div><div class="block"><b>Messages and channel history</b>'+messageHtml+'</div><div class="block"><b>Historical Analog OS</b><p class="muted">OS history is read-only and is shown on a uniquely matched call detail. Open a call above to inspect the signed historical row without importing or changing the OS record.</p></div></div><div class="block"><b>Lead summary</b><p>'+esc(l.summary||"No saved summary")+'</p><p class="muted">All content here is loaded from Attribution records; no changes are written into Analog OS.</p></div>';
+    $("#modalBody").querySelectorAll("[data-lead-call]").forEach(b=>b.onclick=()=>openCall(b.dataset.leadCall));
+    attachPhoneActionHandlers($("#modalBody"));
+    $("#modal").classList.add("open");
+  }catch(error){toast(error?.message||"Could not open lead details");}
+}
+async function openSite(id){
+  try{
+    const data=await api("/v1/dashboard/sites/"+encodeURIComponent(id));
+    const site=data.site||{},suppliers=data.suppliers||[],numbers=data.numbers||[],calls=data.recent_calls||[],seo=data.seo||{};
+    $("#modalTitle").textContent=site.name||site.hostname||"Website";
+    $("#modalMeta").textContent=(site.hostname||"")+" • Attribution portfolio";
+    const metrics=[["Status",site.status],["Visitors (30d)",site.visitors_30d],["Sessions (30d)",site.sessions_30d],["Page views (30d)",site.page_views_30d],["Phone clicks (30d)",site.phone_clicks_30d],["Form submits (30d)",site.form_submissions_30d],["Calls (30d)",site.calls_30d],["Leads (30d)",site.leads_30d]];
+    const metricHtml=metrics.map(([k,v])=>'<div class="card metric"><div class="label">'+esc(k)+'</div><div class="value" style="font-size:18px">'+esc(v??"—")+'</div></div>').join("");
+    const supplierHtml=suppliers.length?'<div class="table-wrap"><table><thead><tr><th>Rank</th><th>Supplier</th><th>Status</th><th>Phone</th><th>Notification email</th></tr></thead><tbody>'+suppliers.map(x=>'<tr><td>'+esc(x.rank)+'</td><td>'+esc(x.name)+'</td><td>'+status(x.active&&x.status==="active"?"active":"inactive")+'</td><td>'+esc(x.contact_phone||"—")+' '+phoneActions(x.contact_phone)+'</td><td>'+esc(x.notification_email||"—")+'</td></tr>').join("")+'</tbody></table></div>':'<div class="empty">No suppliers onboarded to this website.</div>';
+    const numberHtml=numbers.length?'<div class="table-wrap"><table><thead><tr><th>Tracking number</th><th>Forwarding number</th><th>Primary supplier</th><th>Status</th></tr></thead><tbody>'+numbers.map(x=>'<tr><td>'+esc(x.phone_number)+'</td><td>'+esc(x.forwarding_number||"Not linked")+'</td><td>'+esc(x.destination_supplier||"Not linked")+'</td><td>'+status(x.active?"active":"inactive")+'</td></tr>').join("")+'</tbody></table></div>':'<div class="empty">No tracking number inventory assigned.</div>';
+    const callsHtml=calls.length?'<div class="table-wrap"><table><thead><tr><th>Time</th><th>Caller</th><th>Duration</th><th>Status</th><th>Summary</th><th>Details</th></tr></thead><tbody>'+calls.map(x=>'<tr><td>'+fmtDate(x.started_at||x.created_at)+'</td><td>'+esc(x.caller_number||"—")+' '+phoneActions(x.caller_number)+'</td><td>'+fmtDur(x.duration_seconds)+'</td><td>'+status(x.status||x.recording_status)+'</td><td>'+esc(x.summary||"—")+'</td><td><button class="btn" type="button" data-site-call="'+esc(x.id)+'">Open call</button></td></tr>').join("")+'</tbody></table></div>':'<div class="empty">No recent calls recorded.</div>';
+    $("#modalBody").innerHTML='<div style="display:grid;gap:12px"><div class="block"><b>Website performance</b><p><a href="https://'+esc(site.hostname||"")+'" target="_blank" rel="noopener">'+esc(site.hostname||"")+'</a></p><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(125px,1fr))">'+metricHtml+'</div></div><div class="block"><b>Ranked suppliers</b>'+supplierHtml+'</div><div class="block"><b>Tracking and forwarding numbers</b>'+numberHtml+'</div><div class="block"><b>Recent calls</b>'+callsHtml+'</div></div><div style="display:grid;gap:12px"><div class="block"><b>SEO, Google Search Console and GA4</b><p>'+esc(seo.note||"SEO data source not connected.")+'</p><div class="pill">'+esc(seo.status||"not_connected")+'</div></div><div class="block"><b>Site discovery status</b><p class="muted">This website is present in the Attribution registry. MainWP, Analog OS Portfolio, Google Search Console and GA4 inventory syncs must be connected and verified before this screen can claim cross-platform discovery or show those metrics.</p><p class="muted">Last registry date: '+fmtDate(site.created_at)+'</p></div></div>';
+    $("#modalBody").querySelectorAll("[data-site-call]").forEach(b=>b.onclick=()=>openCall(b.dataset.siteCall));
+    attachPhoneActionHandlers($("#modalBody"));
+    $("#modal").classList.add("open");
+  }catch(error){toast(error?.message||"Could not open website details");}
+}
+function switchView(view){
+  for(const name of ["overview","calls","recordings","leads","sites","numbers","system","reports"])$("#"+name+"View").hidden=name!==view;
+  $("#pageTitle").textContent=view==="system"?"Settings":view[0].toUpperCase()+view.slice(1);
+  document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("active",b.dataset.view===view));
+}
+function buildCallsParams(offset=0){
+  const p=new URLSearchParams({limit:"50",offset:String(offset)});
+  if(state.siteId)p.set("siteId",state.siteId);
+  const q=$("#callSearch").value.trim();if(q)p.set("q",q);
+  addDateParam(p,"#callStart","start");addDateParam(p,"#callEnd","end");
+  const statusValue=$("#callStatus").value;if(statusValue)p.set("status",statusValue);
+  const leadType=$("#callLeadType").value.trim();if(leadType)p.set("leadType",leadType);
+  const provider=$("#callProvider").value;if(provider)p.set("provider",provider);
+  return p;
+}
+async function searchCalls(append=false){
+  const button=$("#callsSearchBtn");if(button)button.disabled=true;
+  try{
+    const offset=append?state.calls.length:0;
+    const page=await api("/v1/dashboard/calls?"+buildCallsParams(offset).toString());
+    state.calls=append?state.calls.concat(page.calls||[]):(page.calls||[]);
+    state.callsHasMore=!!page.hasMore;
+    renderCalls($("#callsTable"),state.calls);renderCalls($("#recentCalls"),state.calls.slice(0,10));
+  }finally{if(button)button.disabled=false;}
+}
+async function loadMoreCalls(){
+  if(!state.callsHasMore)return;
+  const button=$("#callsLoadMoreBtn");button.disabled=true;
+  try{await searchCalls(true);}catch(error){toast(error?.message||"Could not load more calls");}
+  finally{button.disabled=false;}
+}
+
+
+async function searchLeads(append=false){
+  const p=new URLSearchParams();
+  const q=$("#leadSearch").value.trim();if(q)p.set("q",q);
+  if($("#leadChannel").value)p.set("channel",$("#leadChannel").value);
+  if($("#leadStatus").value)p.set("status",$("#leadStatus").value);
+  if(state.siteId)p.set("siteId",state.siteId);
+  addDateParam(p,"#leadStart","start");addDateParam(p,"#leadEnd","end");
+  const offset=append?state.leads.length:0;
+  p.set("limit","50");p.set("offset",String(offset));
+  const r=await api("/v1/dashboard/leads/search?"+p.toString());
+  state.leads=append?state.leads.concat(r.leads||[]):(r.leads||[]);
+  state.leadsHasMore=!!r.hasMore;renderLeads();
+}
+async function loadMoreLeads(){
+  if(!state.leadsHasMore)return;
+  const button=$("#loadMoreLeadsBtn");button.disabled=true;
+  try{await searchLeads(true);}catch(error){toast(error?.message||"Could not load more leads");}
+  finally{button.disabled=false;}
+}
+
+
+function reportParams(){
+  const p=new URLSearchParams();
+  if(state.siteId)p.set("siteId",state.siteId);
+  addDateParam(p,"#reportStart","start");addDateParam(p,"#reportEnd","end");
+  return p;
+}
+function updateReportLinks(){
+  const qs=reportParams().toString();
+  $("#reportCsv").href="/v1/dashboard/reports.csv?"+qs;
+  $("#reportPdf").href="/v1/dashboard/reports.pdf?"+qs;
+}
+async function loadReportPreview(){
+  if(!$("#reportPreview"))return null;
+  updateReportLinks();
+  const report=await api("/v1/dashboard/reports/data?"+reportParams().toString());
+  state.reportPreview=report;
+  const k=report.kpi||{},daily=report.daily||[],suppliers=report.suppliers||[];
+  const metrics=[["Leads",k.leads||0],["Touched",k.touched||0],["Sales",k.sales||0]];
+  const metricHtml=metrics.map(x=>'<div class="card metric"><div class="label">'+x[0]+'</div><div class="value">'+Number(x[1]||0)+'</div></div>').join("");
+  const dailyHtml=daily.length?'<div class="table-wrap"><table><thead><tr><th>Day</th><th>Leads</th></tr></thead><tbody>'+daily.map(x=>'<tr><td>'+esc(x.day)+'</td><td>'+Number(x.leads||0)+'</td></tr>').join("")+'</tbody></table></div>':'<div class="empty">No leads in this date range.</div>';
+  const supplierHtml=suppliers.length?'<div class="table-wrap"><table><thead><tr><th>Supplier</th><th>Leads</th><th>Sales</th></tr></thead><tbody>'+suppliers.map(x=>'<tr><td>'+esc(x.supplier)+'</td><td>'+Number(x.leads||0)+'</td><td>'+Number(x.sales||0)+'</td></tr>').join("")+'</tbody></table></div>':'<div class="empty">No supplier activity in this date range.</div>';
+  $("#reportPreview").innerHTML='<div class="grid" style="grid-template-columns:repeat(3,minmax(120px,1fr));margin:14px 0">'+metricHtml+'</div><div class="content-grid"><div class="block"><h3>Daily lead volume</h3>'+dailyHtml+'</div><div class="block"><h3>Supplier outcomes</h3>'+supplierHtml+'</div></div><p class="muted">Preview reflects the selected website and date range. Exported files use the same filters.</p>';
+  return report;
+}
+function emailReport(){
+  const r=state.reportPreview;if(!r){toast("Load the report preview first.");return;}
+  const start=$("#reportStart").value||"Last 30 days",end=$("#reportEnd").value||"Today";
+  const k=r.kpi||{};
+  const body=["Analog Attribution report","Period: "+start+" to "+end,"Website: "+($("#siteFilter").selectedOptions[0]?.textContent||"All websites"),"Leads: "+(k.leads||0),"Touched: "+(k.touched||0),"Sales: "+(k.sales||0),"","CSV: "+window.location.origin+$("#reportCsv").getAttribute("href"),"PDF: "+window.location.origin+$("#reportPdf").getAttribute("href")].join("\n");
+  window.location.href="mailto:info@analogsolution.com?subject="+encodeURIComponent("Analog Attribution report — "+start+" to "+end)+"&body="+encodeURIComponent(body);
+}
+
+
+function setReportDefaultRange(){
+  const now=new Date(),start=new Date(now.getTime()-29*86400000);
+  const local=value=>{const d=new Date(value.getTime()-value.getTimezoneOffset()*60000);return d.toISOString().slice(0,16);};
+  if(!$("#reportStart").value)$("#reportStart").value=local(start);
+  if(!$("#reportEnd").value)$("#reportEnd").value=local(now);
+}
+function bind(){
+  $("#loginForm").onsubmit=login;
+  $("#legacyToggle").onclick=()=>{$("#loginForm").hidden=!$("#loginForm").hidden};
+  $("#logoutBtn").onclick=logout;
+  $("#refreshBtn").onclick=()=>loadAll().then(()=>toast("Dashboard refreshed"));
+  $("#closeModal").onclick=()=>$("#modal").classList.remove("open");
+  $("#modal").onclick=e=>{if(e.target.id==="modal")$("#modal").classList.remove("open")};
+  $("#siteFilter").onchange=e=>{state.siteId=e.target.value;loadAll();};
+  $("#callsSearchBtn").onclick=()=>searchCalls().catch(error=>toast(error?.message||"Call search failed"));
+  $("#callsClearBtn").onclick=()=>{$("#callSearch").value="";$("#callStart").value="";$("#callEnd").value="";$("#callStatus").value="";$("#callLeadType").value="";$("#callProvider").value="";searchCalls().catch(error=>toast(error?.message||"Call search failed"));};
+  $("#callsLoadMoreBtn").onclick=loadMoreCalls;
+  $("#callSearch").onkeydown=e=>{if(e.key==="Enter")searchCalls().catch(()=>toast("Call search failed"));};
+  $("#recordingsSearchBtn").onclick=()=>searchRecordings().catch(error=>toast(error?.message||"Recording search failed"));
+  $("#recordingsClearBtn").onclick=()=>{$("#recordingSearch").value="";$("#recordingStart").value="";$("#recordingEnd").value="";$("#recordingLeadType").value="";searchRecordings().catch(()=>toast("Recording search failed"));};
+  $("#recordingSearch").onkeydown=e=>{if(e.key==="Enter")searchRecordings().catch(()=>toast("Recording search failed"));};
+  $("#recordingsRefreshBtn").onclick=()=>searchRecordings().then(()=>toast("Recordings refreshed")).catch(()=>toast("Could not refresh recordings"));
+  $("#loadMoreRecordingsBtn").onclick=loadMoreRecordings;
+  $("#leadSearchBtn").onclick=()=>searchLeads().catch(()=>toast("Lead search failed"));
+  $("#leadClearBtn").onclick=()=>{$("#leadSearch").value="";$("#leadChannel").value="";$("#leadStatus").value="";$("#leadStart").value="";$("#leadEnd").value="";loadAll();};
+  $("#loadMoreLeadsBtn").onclick=loadMoreLeads;
+  document.querySelectorAll(".nav button").forEach(b=>b.onclick=()=>switchView(b.dataset.view));
+  $("#reportStart").onchange=()=>loadReportPreview().catch(()=>toast("Report preview failed"));
+  $("#reportEnd").onchange=()=>loadReportPreview().catch(()=>toast("Report preview failed"));
+  $("#reportRefreshBtn").onclick=()=>loadReportPreview().then(()=>toast("Report preview updated")).catch(()=>toast("Report preview failed"));
+  $("#reportPrintBtn").onclick=()=>window.print();
+  $("#reportEmailBtn").onclick=emailReport;
+  $("#refreshSystemBtn").onclick=()=>loadAll().then(()=>toast("System status refreshed")).catch(()=>toast("System status refresh failed"));
+  $("#addNumberBtn").onclick=openNewNumberEditor;
+  $("#closeNumberEditor").onclick=closeNumberEditor;
+  $("#cancelNumberEditor").onclick=closeNumberEditor;
+  $("#numberForm").onsubmit=saveNumber;
+  $("#numberSite").onchange=()=>loadNumberDestinationOptions($("#numberSite").value);
+  $("#numberEditorModal").onclick=e=>{if(e.target.id==="numberEditorModal")closeNumberEditor();};
+  setReportDefaultRange();
+}
+
+
 async function boot(){bind();try{const auth=await api("/v1/dashboard/auth/status");state.auth0Enabled=!!auth.auth0Enabled;setupAuthUi();if(auth.authenticated&&auth.accessGranted!==false){state.user=auth.user||null;showApp();await loadAll();return}showLogin();if(auth.authenticated&&auth.accessGranted===false)$("#loginError").textContent=auth.message||("Authenticated as "+(auth.email||"unknown")+", but this account is not authorized for dashboard access.")}catch(err){showLogin();$("#loginError").textContent="Could not reach the dashboard authentication service."}}
 boot();
 /* Interactive control room: attribution signal mesh */

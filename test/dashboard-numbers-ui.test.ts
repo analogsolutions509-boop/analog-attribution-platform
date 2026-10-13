@@ -10,7 +10,7 @@ test("dashboard exposes a Numbers side-panel page", async () => {
   assert.ok(html.includes('id="numbersTable"'));
   assert.ok(html.includes("Forwarding number"));
   assert.ok(html.includes('src="/numbers.js"'));
-  assert.ok(html.includes('api("/v1/dashboard/numbers"+q)'));
+  assert.ok(html.includes('api("/v1/dashboard/numbers"+(state.siteId?"?siteId="+encodeURIComponent(state.siteId):""))'));
 });
 test("dashboard exposes interactive visual controls", async () => {
   const html = await readFile(new URL("../public/dashboard.html", import.meta.url), "utf8");
@@ -21,7 +21,6 @@ test("dashboard exposes interactive visual controls", async () => {
   assert.ok(html.includes("pointermove"));
   assert.ok(html.includes("requestAnimationFrame"));
 });
-
 test("dashboard dropdowns use the signal-mesh visual treatment", async () => {
   const html = await readFile(new URL("../public/dashboard.html", import.meta.url), "utf8");
   assert.ok(html.includes(".signal-select"), "shared dropdown skin should exist");
