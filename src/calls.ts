@@ -4,6 +4,7 @@ import { uploadRecording } from "./storage/r2.js";
 import { analyzeTranscript } from "./call-intelligence/analyze.js";
 import { transcribeFile } from "./call-intelligence/transcribe.js";
 import { queueAnalogOSEvent } from "./analog-os-outbox.js";
+import { buildTranscriptCompletedData } from "./analog-os-transcript.js";
 import { queueNotification } from "./notifications.js";
 import { normalizePhone } from "./utils/phone.js";
 
@@ -33,6 +34,7 @@ export type IncomingCall = {
   hostname?: string;
   provider: string;
   providerCallId: string;
+  attributionMethod?: string;
   callerNumber?: string;
   calledNumber?: string;
   direction?: string;
@@ -51,8 +53,9 @@ export async function upsertIncomingCall(input: IncomingCall): Promise<string> {
     `INSERT INTO calls(
       site_id, provider, provider_call_id, caller_number, called_number, direction,
       started_at, ended_at, duration_seconds, recording_source_url, recording_mime_type,
-      tracking_number_id, forwarding_number_id, tracking_number, forwarding_number, destination_number
-    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+      tracking_number_id, forwarding_number_id, tracking_number, forwarding_number, destination_number,
+      attribution_method
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
     ON CONFLICT(provider, provider_call_id) DO UPDATE SET
       caller_number=COALESCE(EXCLUDED.caller_number,calls.caller_number),
       called_number=COALESCE(EXCLUDED.called_number,calls.called_number),
@@ -67,6 +70,7 @@ export async function upsertIncomingCall(input: IncomingCall): Promise<string> {
       tracking_number=COALESCE(EXCLUDED.tracking_number,calls.tracking_number),
       forwarding_number=COALESCE(EXCLUDED.forwarding_number,calls.forwarding_number),
       destination_number=COALESCE(EXCLUDED.destination_number,calls.destination_number),
+      attribution_method=COALESCE(NULLIF(EXCLUDED.attribution_method,'unknown'),calls.attribution_method),
       updated_at=NOW()
     RETURNING id`,
     [
@@ -85,7 +89,8 @@ export async function upsertIncomingCall(input: IncomingCall): Promise<string> {
       route?.forwarding_number_id ?? null,
       route?.tracking_number ?? input.calledNumber ?? null,
       route?.forwarding_number ?? null,
-      route?.destination_number ?? null
+      route?.destination_number ?? null,
+      input.attributionMethod ?? "unknown"
     ]
   );
   const callId = result.rows[0].id as string;
@@ -96,6 +101,7 @@ export async function upsertIncomingCall(input: IncomingCall): Promise<string> {
     hostname: input.hostname ?? null,
     provider: input.provider,
     provider_call_id: input.providerCallId,
+    method: input.attributionMethod ?? "unknown",
     caller_number: input.callerNumber ?? null,
     called_number: input.calledNumber ?? null,
     tracking_number: route?.tracking_number ?? input.calledNumber ?? null,
@@ -231,10 +237,26 @@ export async function completeTranscript(
     );
   }
 
-  await queueAnalogOSEvent("transcript.completed", "call", callId, {
-    call_id: callId, transcript_id: transcriptId, provider: transcript.provider,
-    model: transcript.model, duration_seconds: transcript.duration
-  });
+  // Persist the full transcript on the call record before any optional AI extraction.
+  await db.query(
+    "UPDATE calls SET transcript_status='complete', transcript_text=$2, transcript_segments=$3, updated_at=NOW() WHERE id=$1",
+    [callId, transcript.text, transcript.segments]
+  );
+
+  const callContextResult = await db.query(
+    `SELECT c.id,c.site_id,s.name AS site_name,s.hostname,c.provider,c.provider_call_id,
+            c.caller_number,c.called_number,c.direction,c.started_at,c.ended_at,c.duration_seconds,
+            c.attribution_method,c.recording_status,c.recording_storage_key,c.recording_sha256
+     FROM calls c JOIN sites s ON s.id=c.site_id WHERE c.id=$1 LIMIT 1`,
+    [callId]
+  );
+  if (!callContextResult.rowCount) throw new Error("call_not_found");
+  const transcriptEventData = buildTranscriptCompletedData(
+    callContextResult.rows[0],
+    transcriptId,
+    transcript
+  );
+  await queueAnalogOSEvent("transcript.completed", "call", callId, transcriptEventData);
 
   if (!apiKey) {
     await queueCallCompletionNotifications(callId);
@@ -325,8 +347,8 @@ export async function completeTranscript(
   }
 
   await db.query(
-    "UPDATE calls SET transcript_status='complete', transcript_text=$2, transcript_segments=$3, intelligence=$4, updated_at=NOW() WHERE id=$1",
-    [callId, transcript.text, transcript.segments, intelligence]
+    "UPDATE calls SET intelligence=$2, updated_at=NOW() WHERE id=$1",
+    [callId, intelligence]
   );
   await queueAnalogOSEvent("call.intelligence.completed", "call", callId, {
     call_id: callId, transcript_id: transcriptId, intelligence

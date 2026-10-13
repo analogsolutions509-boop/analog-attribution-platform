@@ -6,7 +6,7 @@ import { upsertIncomingCall } from "../calls.js";
 import { attributeCallToLead } from "../leads.js";
 import { isSafeRecordingUrl } from "../call-recording.js";
 import { normalizePhone } from "../utils/phone.js";
-import { normalizeSecondRingCall, verifyWebhookSecret } from "../providers/secondring.js";
+import { normalizeSecondRingCall, selectSecondRingSiteResolution, verifyWebhookSecret } from "../providers/secondring.js";
 
 function webhookCredential(request: { headers: Record<string, string | string[] | undefined> }): string | undefined {
   const direct = request.headers["x-analog-provider-secret"] ?? request.headers["x-secondring-webhook-secret"];
@@ -18,27 +18,38 @@ function webhookCredential(request: { headers: Record<string, string | string[] 
 }
 
 async function resolveSite(payload: { siteId?: string; calledNumber?: string }) {
+  let explicitSite = null;
   if (payload.siteId) {
     const result = await db.query(
       "SELECT id,hostname,name,status FROM sites WHERE id=$1 AND status='active' LIMIT 1",
       [payload.siteId]
     );
-    if (result.rowCount) return result.rows[0];
+    explicitSite = result.rows[0] ?? null;
   }
+  if (explicitSite) return selectSecondRingSiteResolution({ explicitSite });
 
+  let calledNumberSite = null;
   const calledNumber = normalizePhone(payload.calledNumber);
-  if (!calledNumber) return null;
+  if (calledNumber) {
+    const result = await db.query(
+      "SELECT s.id,s.hostname,s.name,s.status " +
+      "FROM tracking_numbers tn " +
+      "JOIN sites s ON s.id=tn.site_id " +
+      "WHERE tn.active AND s.status='active' " +
+      "AND regexp_replace(tn.phone_number,'\\D','','g')=$1 " +
+      "LIMIT 1",
+      [calledNumber]
+    );
+    calledNumberSite = result.rows[0] ?? null;
+  }
+  if (calledNumberSite) return selectSecondRingSiteResolution({ calledNumberSite });
 
-  const result = await db.query(
-    "SELECT s.id,s.hostname,s.name,s.status " +
-    "FROM tracking_numbers tn " +
-    "JOIN sites s ON s.id=tn.site_id " +
-    "WHERE tn.active AND s.status='active' " +
-    "AND regexp_replace(tn.phone_number,'\\D','','g')=$1 " +
-    "LIMIT 1",
-    [calledNumber]
+  // Retain calls from the shared line, but never guess which website generated one.
+  const sharedResult = await db.query(
+    "SELECT id,hostname,name,status FROM sites WHERE hostname=$1 AND status<>'disabled' LIMIT 1",
+    [config.SECONDRING_SHARED_LINE_HOSTNAME]
   );
-  return result.rows[0] ?? null;
+  return selectSecondRingSiteResolution({ sharedLineSite: sharedResult.rows[0] ?? null });
 }
 
 export async function registerSecondRingRoutes(app: FastifyInstance) {
@@ -71,6 +82,7 @@ export async function registerSecondRingRoutes(app: FastifyInstance) {
       hostname: site.hostname,
       provider: "secondring",
       providerCallId: call.providerCallId,
+      attributionMethod: site.attributionMethod,
       callerNumber: call.callerNumber,
       calledNumber: call.calledNumber,
       direction: call.direction,

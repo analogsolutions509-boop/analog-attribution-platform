@@ -25,3 +25,12 @@ The platform deliberately does not fake fields or invent an endpoint. Once the a
 
 ## Target flow
 SecondRing -> call adapter -> PostgreSQL call record -> recording archive -> transcript/diarization -> AI extraction -> lead.
+
+
+## Shared SecondRing line behavior added on 14 October 2026
+
+- Migration 021 creates the paused internal sink site `shared-secondring-line.internal` and records an explicit `attribution_method` on calls.
+- SecondRing events with a valid site ID use that site; otherwise a registered dedicated number match is used; if neither matches, the call is stored against **SecondRing Shared Line (Unattributed)**. The receiver must never guess among the 21 public websites.
+- Once an authenticated event contains a stable call ID and a secure recording URL, the worker archives the recording to private R2, transcribes it, stores the complete text and speaker segments in PostgreSQL, and enqueues a signed `transcript.completed` event containing the full transcript and archive metadata.
+- The Analog OS webhook writes/upserts the full transcript and segments into the `Attribution Transcripts` tab. A later AI-summary event updates the same Call ID row rather than duplicating it or overwriting the transcript.
+- A live call has not yet passed end-to-end. The account-specific SecondRing webhook payload/authentication and recording download access still need verification, followed by a real test call before rolling the shared phone number onto all sites.
