@@ -5,7 +5,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#0b1022">
 <meta name="description" content="Analog Attribution Platform — calls, leads, recordings and attribution.">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Analog Attribution">
 <link rel="manifest" href="/dashboard/manifest.json">
+<link rel="apple-touch-icon" sizes="180x180" href="/dashboard/icons/icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/dashboard/icons/icon-192.png">
 <title>Analog Attribution</title>
 <style>
 :root{--bg:#070b18;--panel:#10162b;--panel2:#141c35;--line:#26304f;--text:#f5f7ff;--muted:#93a0c0;--blue:#4aa3ff;--cyan:#55d6ff;--purple:#9867ff;--green:#45d39a;--amber:#f4bb55;--red:#ff7188;--shadow:0 18px 50px rgba(0,0,0,.28)}
@@ -57,6 +63,66 @@ body::before{content:"";position:fixed;inset:0;z-index:-3;pointer-events:none;ba
 @keyframes scan{from{transform:translateX(-20%)}to{transform:translateX(20%)}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition:none!important}}
 @media print{.side,.top .actions,.toolbar button,#login,.toast{display:none!important}.main{padding:0}.card{box-shadow:none;break-inside:avoid}body{background:#fff;color:#111}.muted{color:#444}}
+/* Mobile-first navigation and reliable touch targets */
+@media (max-width: 760px) {
+  .side {
+    display: block !important;
+    position: fixed !important;
+    inset: auto 0 0 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom)) !important;
+    border: 0 !important;
+    border-top: 1px solid var(--line) !important;
+    border-radius: 16px 16px 0 0;
+    z-index: 30 !important;
+    background: rgba(5, 9, 23, .97) !important;
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, .42) !important;
+  }
+  .side .brand, .side small, .side .reactive-line { display: none !important; }
+  .nav {
+    display: flex !important;
+    align-items: stretch;
+    gap: 4px;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+  .nav button {
+    display: block !important;
+    flex: 0 0 auto;
+    width: auto !important;
+    min-width: max-content;
+    min-height: 44px;
+    margin: 0;
+    padding: 9px 12px;
+    text-align: center;
+    white-space: nowrap;
+    touch-action: manipulation;
+  }
+  .main { padding: 15px 12px calc(108px + env(safe-area-inset-bottom)) !important; }
+  .top, .actions { gap: 8px; }
+  .actions button, .actions select, .btn { min-height: 42px; touch-action: manipulation; }
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .content-grid, .modal-body { grid-template-columns: minmax(0, 1fr); }
+  .modal { padding: 8px; }
+  .modal-box { width: 100%; }
+  .modal-head, .modal-body { padding: 14px; }
+}
+@media (hover: none), (pointer: coarse) {
+  .nav button:hover, .btn:hover, .card:hover, .signal-select:hover {
+    transform: none !important;
+  }
+  .nav button, .btn, .signal-select, input, select, textarea {
+    touch-action: manipulation;
+  }
+  .card { will-change: auto; }
+}
 </style>
 </head>
 <body>
@@ -65,6 +131,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-3;pointer-events:none;ba
 <div class="brand">ANALOG <span>ATTRIBUTION</span></div>
 <h1>Sign in</h1>
 <p class="muted">Calls, leads, attribution and call intelligence.</p>
+<button id="installAppLoginBtn" class="btn" type="button" style="width:100%;margin:10px 0">Install app</button>
 <div id="auth0Actions" hidden>
 <button id="googleLogin" class="btn primary" type="button" style="width:100%">Continue with Google</button>
 <div style="display:grid;gap:8px;margin-top:10px;text-align:center">
@@ -100,7 +167,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-3;pointer-events:none;ba
 </aside>
 <main class="main">
 <div class="top"><div class="title"><h1 id="pageTitle">Overview</h1><p>One place for every lead, call, recording and attribution signal.</p></div>
-<div class="actions"><select id="siteFilter"><option value="">All websites</option></select><button id="refreshBtn" class="btn">Refresh</button><button id="logoutBtn" class="btn">Sign out</button><div class="scene-controls" aria-label="Visual controls">
+<div class="actions"><select id="siteFilter"><option value="">All websites</option></select><button id="refreshBtn" class="btn">Refresh</button><button id="installAppBtn" class="btn" type="button">Install app</button><button id="logoutBtn" class="btn">Sign out</button><div class="scene-controls" aria-label="Visual controls">
 <label class="power-switch" data-on="true"><span class="power-dot"></span><input id="ambientPower" type="checkbox" checked> Field</label>
 <label class="power-switch" data-on="true"><span class="power-dot"></span><input id="depthPower" type="checkbox" checked> 3D</label>
 <label class="power-switch" data-on="true"><span class="power-dot"></span><input id="glowPower" type="checkbox" checked> Glow</label>
@@ -748,7 +815,44 @@ boot();
   skinAllSelects();
   new MutationObserver(skinAllSelects).observe(document.body,{childList:true,subtree:true});
 })();
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("/dashboard/sw.js").catch(()=>{});
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("/dashboard/sw.js").catch(() => {}));
+}
+let analogDeferredInstallPrompt = null;
+const analogInstallButtons = [document.getElementById("installAppBtn"), document.getElementById("installAppLoginBtn")].filter(Boolean);
+const analogIsStandalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+function analogInstallGuidance() {
+  if (analogIsStandalone()) { window.alert("Analog Attribution is already installed on this device."); return; }
+  if (analogDeferredInstallPrompt) {
+    const promptEvent = analogDeferredInstallPrompt;
+    analogDeferredInstallPrompt = null;
+    promptEvent.prompt();
+    promptEvent.userChoice.then((choice) => {
+      if (choice.outcome === "accepted") analogInstallButtons.forEach((button) => { button.textContent = "Installing…"; });
+    }).catch(() => {});
+    return;
+  }
+  const ua = navigator.userAgent || "";
+  const ios = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const android = /android/i.test(ua);
+  if (ios) {
+    window.alert("Install Analog Attribution on iPhone/iPad:\n1. Open this page in Safari.\n2. Tap the Share button.\n3. Choose Add to Home Screen.\n4. Tap Add.");
+  } else if (android) {
+    window.alert("Install Analog Attribution on Android:\n1. Open this page in Chrome.\n2. Open the browser menu.\n3. Choose Install app or Add to Home screen.");
+  } else {
+    window.alert("Install Analog Attribution on your computer:\n1. Open this page in Chrome or Microsoft Edge.\n2. Open the browser menu or use the install icon in the address bar.\n3. Choose Install Analog Attribution.\n\nThe app needs an internet connection to load live platform data.");
+  }
+}
+analogInstallButtons.forEach((button) => button.addEventListener("click", analogInstallGuidance));
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  analogDeferredInstallPrompt = event;
+  analogInstallButtons.forEach((button) => { button.textContent = "Install app"; });
+});
+window.addEventListener("appinstalled", () => {
+  analogDeferredInstallPrompt = null;
+  analogInstallButtons.forEach((button) => { button.textContent = "App installed"; });
+});
 </script>
 <script src="/suppliers.js"></script>
 <script src="/numbers.js"></script>

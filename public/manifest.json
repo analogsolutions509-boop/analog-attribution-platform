@@ -1,9 +1,28 @@
 {
+  "id": "/dashboard/",
   "name": "Analog Attribution Platform",
   "short_name": "Analog Attribution",
-  "start_url": "/dashboard",
+  "description": "First-party calls, leads, recordings and attribution for Analog Solutions.",
+  "start_url": "/dashboard/",
+  "scope": "/dashboard/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
   "background_color": "#070b18",
   "theme_color": "#0b1022",
-  "icons": []
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "/dashboard/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/dashboard/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
 }

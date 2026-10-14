@@ -503,6 +503,20 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
     return reply.type("text/html; charset=utf-8").send(html);
   });
 
+  app.get("/dashboard/", async (_request, reply) => {
+    const html = await readFile(join(UI_ROOT, "dashboard.html"), "utf8");
+    return reply.type("text/html; charset=utf-8").send(html);
+  });
+
+  app.get<{ Params: { icon: string } }>("/dashboard/icons/:icon", async (request, reply) => {
+    const fileName = request.params.icon;
+    if (!["icon-180.png", "icon-192.png", "icon-512.png"].includes(fileName)) {
+      return reply.code(404).send({ error: "icon_not_found" });
+    }
+    const body = await readFile(join(UI_ROOT, "icons", fileName));
+    return reply.type("image/png").header("cache-control", "public, max-age=604800").send(body);
+  });
+
   app.get("/dashboard/manifest.json", async (_request, reply) => {
     const body = await readFile(join(UI_ROOT, "manifest.json"), "utf8");
     return reply.type("application/manifest+json").send(body);
@@ -515,6 +529,21 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
 
   app.get("/numbers.js", async (_request, reply) => {
     const body = await readFile(join(UI_ROOT, "numbers.js"), "utf8");
+    return reply.type("application/javascript; charset=utf-8").send(body);
+  });
+
+  app.get("/dashboard/suppliers.js", async (_request, reply) => {
+    const body = await readFile(join(UI_ROOT, "suppliers.js"), "utf8");
+    return reply.type("application/javascript; charset=utf-8").send(body);
+  });
+
+  app.get("/dashboard/numbers.js", async (_request, reply) => {
+    const body = await readFile(join(UI_ROOT, "numbers.js"), "utf8");
+    return reply.type("application/javascript; charset=utf-8").send(body);
+  });
+
+  app.get("/dashboard/onboarding.js", async (_request, reply) => {
+    const body = await readFile(join(UI_ROOT, "onboarding.js"), "utf8");
     return reply.type("application/javascript; charset=utf-8").send(body);
   });
 
