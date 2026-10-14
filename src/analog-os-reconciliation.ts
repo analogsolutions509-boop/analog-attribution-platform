@@ -52,6 +52,60 @@ export function validateReconciliationDate(value: string): string {
   return value;
 }
 
+export function validateReconciliationMonth(value: string): string {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) throw new Error("invalid_reconciliation_month");
+  const parsed = new Date(value + "-01T00:00:00Z");
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 7) !== value) {
+    throw new Error("invalid_reconciliation_month");
+  }
+  return value;
+}
+
+export function getLondonMonthKey(value = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: LONDON_TZ, year: "numeric", month: "2-digit"
+  }).formatToParts(value);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  if (!year || !month) throw new Error("london_month_unavailable");
+  return year + "-" + month;
+}
+
+export function getPreviousLondonMonthKey(value = new Date()): string {
+  const current = getLondonMonthKey(value);
+  const [year, month] = current.split("-").map(Number);
+  return getLondonMonthKey(new Date(Date.UTC(year, month - 2, 1, 12)));
+}
+
+export function getMonthDateKeys(monthInput: string, now = new Date()): string[] {
+  const month = validateReconciliationMonth(monthInput);
+  const [year, monthNumber] = month.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const finalDay = month === getLondonMonthKey(now)
+    ? Number(getLondonDateKey(now).slice(-2))
+    : lastDay;
+  const dates: string[] = [];
+  for (let day = 1; day <= finalDay; day++) {
+    dates.push(year + "-" + String(monthNumber).padStart(2, "0") + "-" + String(day).padStart(2, "0"));
+  }
+  return dates;
+}
+
+export function dedupeAnalogOSMonthLeads(leads: AnalogOSLead[]): AnalogOSLead[] {
+  const bySourceRecord = new Map<string, AnalogOSLead>();
+  for (const lead of leads) {
+    const identity = String(lead.source_record || lead.os_lead_id || "").trim();
+    if (!identity) continue;
+    const key = String(lead.source || "unknown").trim().toLowerCase() + ":" + identity.toLowerCase();
+    if (!bySourceRecord.has(key)) bySourceRecord.set(key, lead);
+  }
+  return [...bySourceRecord.values()].sort((a, b) => {
+    const aTime = Date.parse(a.occurred_at);
+    const bTime = Date.parse(b.occurred_at);
+    return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+  });
+}
+
 export function canonicalHostname(value: string): string {
   return String(value || "").trim()
     .replace(/^https?:\/\//i, "").split("/")[0].split(":")[0]
@@ -248,6 +302,69 @@ export async function getReadOnlyAnalogOSContext(input: {
     leads: exported.leads,
     generatedAt: exported.generated_at
   });
+}
+
+export type AnalogOSMonthExport = {
+  month: string;
+  generated_at: string;
+  refreshed_at: string;
+  days_queried: number;
+  leads: AnalogOSLead[];
+  counts: { total: number; whatconverts: number; email: number };
+};
+
+/**
+ * Read a month of legacy OS leads through the existing signed, date-scoped
+ * export. This is a read-only archive operation: it never writes to live leads
+ * or calls the supplier-routing pipeline. Daily requests are concurrency-limited
+ * to avoid flooding the Apps Script endpoint.
+ */
+export async function getReadOnlyAnalogOSMonth(monthInput: string, now = new Date()): Promise<AnalogOSMonthExport> {
+  const month = validateReconciliationMonth(monthInput);
+  const currentMonth = getLondonMonthKey(now);
+  if (month > currentMonth) throw new Error("future_month_not_allowed");
+
+  const dates = getMonthDateKeys(month, now);
+  const exports: Array<AnalogOSLeadExport | undefined> = new Array(dates.length);
+  const failures: string[] = [];
+  let next = 0;
+  const concurrency = Math.min(8, dates.length);
+  await Promise.all(Array.from({ length: concurrency }, async () => {
+    while (true) {
+      const index = next++;
+      if (index >= dates.length) return;
+      const date = dates[index];
+      if (!date) continue;
+      try {
+        exports[index] = await fetchOSLeadsReadOnly(date);
+      } catch {
+        failures.push(date);
+      }
+    }
+  }));
+
+  if (failures.length) {
+    throw new Error("analog_os_month_pull_incomplete:" + failures.sort().join(","));
+  }
+
+  const verifiedExports = exports.filter((item): item is AnalogOSLeadExport => Boolean(item));
+  const leads = dedupeAnalogOSMonthLeads(verifiedExports.flatMap((item) => item.leads));
+  const generatedAt = verifiedExports
+    .map((item) => item.generated_at)
+    .filter(Boolean)
+    .sort((a, b) => Date.parse(b) - Date.parse(a))[0] ?? now.toISOString();
+  return {
+    month,
+    generated_at: generatedAt,
+    refreshed_at: now.toISOString(),
+    days_queried: dates.length,
+    leads,
+    counts: {
+      total: leads.length,
+      whatconverts: leads.filter((lead) => /what\s*converts/i.test(lead.source)).length,
+      email: leads.filter((lead) => /email/i.test(lead.source)).length
+    }
+  };
 }
 
 /**
