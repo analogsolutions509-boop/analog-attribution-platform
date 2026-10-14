@@ -41,12 +41,11 @@ export async function registerWhatConvertsRoutes(app: FastifyInstance) {
     }
 
     const site = await resolveSite(call.calledNumber);
-    if (!site) return reply.code(422).send({ error: "site_resolution_failed" });
 
     const callId = await upsertIncomingCall({
-      siteId: site.id,
-      siteName: site.name,
-      hostname: site.hostname,
+      siteId: site?.id ?? null,
+      siteName: site?.name,
+      hostname: site?.hostname,
       provider: "whatconverts",
       providerCallId: call.providerCallId,
       callerNumber: call.callerNumber,
@@ -59,7 +58,7 @@ export async function registerWhatConvertsRoutes(app: FastifyInstance) {
       recordingMimeType: call.recordingMimeType
     });
 
-    await attributeCallToLead(callId, site.id, call.callerNumber, call.startedAt, call.calledNumber);
+    if (site?.id) await attributeCallToLead(callId, site.id, call.callerNumber, call.startedAt, call.calledNumber);
     await db.query("UPDATE calls SET status=$2, updated_at=NOW() WHERE id=$1", [callId, call.status ?? "received"]);
 
     if (call.recordingUrl) await createJob("call.process", "call", callId, {}, { forceRequeue: true });
@@ -69,7 +68,8 @@ export async function registerWhatConvertsRoutes(app: FastifyInstance) {
       ok: true,
       call_id: callId,
       lead_id: call.leadId,
-      site_id: site.id,
+      site_id: site?.id ?? null,
+      attribution_status: site?.id ? "attributed" : "unattributed",
       status: call.status ?? "received",
       recording_received: Boolean(call.recordingUrl)
     });

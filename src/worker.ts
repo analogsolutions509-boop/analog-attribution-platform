@@ -235,7 +235,7 @@ async function processCall(callId: string) {
   const call = result.rows[0];
 
   try {
-    if (String(call.direction ?? "").toLowerCase() !== "outbound") {
+    if (call.site_id && String(call.direction ?? "").toLowerCase() !== "outbound") {
       await attributeCallToLead(
         callId,
         String(call.site_id),

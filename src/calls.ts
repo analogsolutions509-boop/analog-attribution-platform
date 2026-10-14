@@ -7,7 +7,8 @@ import { queueAnalogOSEvent } from "./analog-os-outbox.js";
 import { queueNotification } from "./notifications.js";
 import { normalizePhone } from "./utils/phone.js";
 
-export async function resolveCallNumberRoute(siteId: string, calledNumber?: string) {
+export async function resolveCallNumberRoute(siteId: string | null | undefined, calledNumber?: string) {
+  if (!siteId) return null;
   const normalized = normalizePhone(calledNumber);
   if (!normalized) return null;
   const result = await db.query(
@@ -28,7 +29,7 @@ export async function resolveCallNumberRoute(siteId: string, calledNumber?: stri
 }
 
 export type IncomingCall = {
-  siteId: string;
+  siteId: string | null;
   siteName?: string;
   hostname?: string;
   provider: string;
@@ -44,7 +45,7 @@ export type IncomingCall = {
 };
 
 export async function upsertIncomingCall(input: IncomingCall): Promise<string> {
-  const route = input.direction?.toLowerCase() === "outbound"
+  const route = !input.siteId || input.direction?.toLowerCase() === "outbound"
     ? null
     : await resolveCallNumberRoute(input.siteId, input.calledNumber);
   const result = await db.query(
@@ -83,13 +84,13 @@ export async function upsertIncomingCall(input: IncomingCall): Promise<string> {
       input.recordingMimeType ?? null,
       route?.tracking_number_id ?? null,
       route?.forwarding_number_id ?? null,
-      route?.tracking_number ?? input.calledNumber ?? null,
+      route?.tracking_number ?? null,
       route?.forwarding_number ?? null,
       route?.destination_number ?? null
     ]
   );
   const callId = result.rows[0].id as string;
-  await queueAnalogOSEvent("call.created", "call", callId, {
+  if (input.siteId) await queueAnalogOSEvent("call.created", "call", callId, {
     call_id: callId,
     site_id: input.siteId,
     site_name: input.siteName ?? null,
@@ -98,7 +99,7 @@ export async function upsertIncomingCall(input: IncomingCall): Promise<string> {
     provider_call_id: input.providerCallId,
     caller_number: input.callerNumber ?? null,
     called_number: input.calledNumber ?? null,
-    tracking_number: route?.tracking_number ?? input.calledNumber ?? null,
+    tracking_number: route?.tracking_number ?? null,
     forwarding_number: route?.forwarding_number ?? null,
     destination_number: route?.destination_number ?? null,
     tracking_number_id: route?.tracking_number_id ?? null,
@@ -120,13 +121,14 @@ export async function publishCallUpdated(callId: string): Promise<void> {
             c.direction,c.started_at,c.ended_at,c.duration_seconds,c.status,
             c.recording_status,c.recording_source_url
      FROM calls c
-     JOIN sites s ON s.id=c.site_id
+     LEFT JOIN sites s ON s.id=c.site_id
      WHERE c.id=$1
      LIMIT 1`,
     [callId]
   );
   if (!result.rowCount) return;
   const row = result.rows[0];
+  if (!row.site_id) return;
   await queueAnalogOSEvent("call.updated", "call", callId, {
     call_id: row.id,
     site_id: row.site_id,
@@ -150,11 +152,11 @@ export async function publishCallUpdated(callId: string): Promise<void> {
 }
 
 export async function attachRecording(callId: string, recordingUrl: string, mimeType?: string): Promise<void> {
-  await db.query(
-    "UPDATE calls SET recording_source_url=$2, recording_mime_type=COALESCE($3,recording_mime_type), recording_status='ready', updated_at=NOW() WHERE id=$1",
+  const updated = await db.query(
+    "UPDATE calls SET recording_source_url=$2, recording_mime_type=COALESCE($3,recording_mime_type), recording_status='ready', updated_at=NOW() WHERE id=$1 RETURNING site_id",
     [callId, recordingUrl, mimeType ?? null]
   );
-  await queueAnalogOSEvent("recording.ready", "call", callId, {
+  if (updated.rows[0]?.site_id) await queueAnalogOSEvent("recording.ready", "call", callId, {
     call_id: callId, recording_url: recordingUrl, recording_mime_type: mimeType ?? null
   });
 }
@@ -168,7 +170,8 @@ export async function archiveRecording(
   const call = await db.query("SELECT site_id FROM calls WHERE id=$1", [callId]);
   if (!call.rowCount) throw new Error("call_not_found");
   const hash = createHash("sha256").update(bytes).digest("hex");
-  const key = `recordings/${new Date().getUTCFullYear()}/${call.rows[0].site_id}/${callId}.${extension}`;
+  const siteFolder = typeof call.rows[0].site_id === "string" ? call.rows[0].site_id : "unattributed";
+  const key = "recordings/" + new Date().getUTCFullYear() + "/" + siteFolder + "/" + callId + "." + extension;
   await uploadRecording(key, bytes, mimeType);
   await db.query(
     `INSERT INTO recording_assets(
@@ -185,7 +188,7 @@ export async function archiveRecording(
     "UPDATE calls SET recording_status='stored', recording_storage_key=$2, recording_sha256=$3, updated_at=NOW() WHERE id=$1",
     [callId, key, hash]
   );
-  await queueAnalogOSEvent("recording.archived", "call", callId, {
+  if (call.rows[0].site_id) await queueAnalogOSEvent("recording.archived", "call", callId, {
     call_id: callId, storage_key: key, mime_type: mimeType, size_bytes: bytes.byteLength, sha256: hash
   });
   return key;
@@ -231,7 +234,9 @@ export async function completeTranscript(
     );
   }
 
-  await queueAnalogOSEvent("transcript.completed", "call", callId, {
+  const callContext = await db.query("SELECT site_id FROM calls WHERE id=$1 LIMIT 1", [callId]);
+  const hasWebsiteAttribution = Boolean(callContext.rows[0]?.site_id);
+  if (hasWebsiteAttribution) await queueAnalogOSEvent("transcript.completed", "call", callId, {
     call_id: callId, transcript_id: transcriptId, provider: transcript.provider,
     model: transcript.model, duration_seconds: transcript.duration
   });
@@ -328,7 +333,7 @@ export async function completeTranscript(
     "UPDATE calls SET transcript_status='complete', transcript_text=$2, transcript_segments=$3, intelligence=$4, updated_at=NOW() WHERE id=$1",
     [callId, transcript.text, transcript.segments, intelligence]
   );
-  await queueAnalogOSEvent("call.intelligence.completed", "call", callId, {
+  if (hasWebsiteAttribution) await queueAnalogOSEvent("call.intelligence.completed", "call", callId, {
     call_id: callId, transcript_id: transcriptId, intelligence
   });
   await queueCallCompletionNotifications(callId);

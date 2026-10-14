@@ -58,17 +58,18 @@ export async function registerTelephonyRoutes(app: FastifyInstance) {
       }
       await publishCallUpdated(callId);
       if(event.recordingUrl) await createJob("call.process","call",callId,{}, {forceRequeue:true});
-      await attributeCallToLead(callId,existing.rows[0].site_id,event.callerNumber,event.startedAt,event.calledNumber);
-      return reply.send({ok:true,updated:true,call_id:callId});
+      if (existing.rows[0].site_id) {
+        await attributeCallToLead(callId,existing.rows[0].site_id,event.callerNumber,event.startedAt,event.calledNumber);
+      }
+      return reply.send({ok:true,updated:true,call_id:callId,attribution_status:existing.rows[0].site_id ? "attributed" : "unattributed"});
     }
 
     const number = event.calledNumber?.replace(/\D/g,"") ?? "";
     const site = await db.query("SELECT s.id,s.name,s.hostname FROM tracking_numbers tn JOIN sites s ON s.id=tn.site_id WHERE tn.active AND regexp_replace(tn.phone_number,'\\D','','g')=$1 LIMIT 1",[number]);
-    if (!site.rowCount) return reply.code(422).send({error:"site_resolution_failed"});
     const callId = await upsertIncomingCall({
-      siteId: site.rows[0].id,
-      siteName: site.rows[0].name,
-      hostname: site.rows[0].hostname,
+      siteId: site.rows[0]?.id ?? null,
+      siteName: site.rows[0]?.name,
+      hostname: site.rows[0]?.hostname,
       provider: "wazo",
       providerCallId: event.providerCallId,
       callerNumber: event.callerNumber,
@@ -79,7 +80,15 @@ export async function registerTelephonyRoutes(app: FastifyInstance) {
       durationSeconds: event.durationSeconds,
       recordingUrl: event.recordingUrl
     });
-    return reply.code(202).send({ok:true,call_id:callId,event:event.event});
+    if (event.recordingUrl) await createJob("call.process", "call", callId, {}, { forceRequeue: true });
+    return reply.code(202).send({
+      ok:true,
+      call_id:callId,
+      event:event.event,
+      site_id:site.rows[0]?.id ?? null,
+      attribution_status:site.rows[0]?.id ? "attributed" : "unattributed",
+      recording_received:Boolean(event.recordingUrl)
+    });
   };
 
   app.post("/v1/providers/wazo/webhook", async (request, reply) => {

@@ -95,7 +95,9 @@ export function normalizeDidwwCallEvent(payload:any){
     connectedAt:typeof attributes.time_connect==="string" ? attributes.time_connect : undefined,
     endedAt:typeof attributes.time_end==="string" ? attributes.time_end : undefined,
     durationSeconds:Number.isFinite(Number(attributes.duration)) ? Number(attributes.duration) : undefined,
-    status
+    status,
+    recordingUrl:typeof (attributes.recording_url??attributes.recordingUrl)==="string" ? String(attributes.recording_url??attributes.recordingUrl) : undefined,
+    recordingMimeType:typeof (attributes.recording_mime_type??attributes.recordingMimeType)==="string" ? String(attributes.recording_mime_type??attributes.recordingMimeType) : undefined
   };
 }
 

@@ -61,14 +61,11 @@ export async function registerSecondRingRoutes(app: FastifyInstance) {
     }
 
     const site = await resolveSite(call);
-    if (!site) {
-      return reply.code(422).send({ error: "site_resolution_failed" });
-    }
 
     const callId = await upsertIncomingCall({
-      siteId: site.id,
-      siteName: site.name,
-      hostname: site.hostname,
+      siteId: site?.id ?? null,
+      siteName: site?.name,
+      hostname: site?.hostname,
       provider: "secondring",
       providerCallId: call.providerCallId,
       callerNumber: call.callerNumber,
@@ -81,13 +78,15 @@ export async function registerSecondRingRoutes(app: FastifyInstance) {
       recordingMimeType: call.recordingMimeType
     });
 
-    await attributeCallToLead(
-      callId,
-      site.id,
-      call.callerNumber,
-      call.startedAt,
-      call.calledNumber
-    );
+    if (site?.id) {
+      await attributeCallToLead(
+        callId,
+        site.id,
+        call.callerNumber,
+        call.startedAt,
+        call.calledNumber
+      );
+    }
 
     if (call.recordingUrl) {
       await createJob("call.process", "call", callId);
@@ -96,7 +95,8 @@ export async function registerSecondRingRoutes(app: FastifyInstance) {
     return reply.code(202).send({
       ok: true,
       call_id: callId,
-      site_id: site.id,
+      site_id: site?.id ?? null,
+      attribution_status: site?.id ? "attributed" : "unattributed",
       recording_received: Boolean(call.recordingUrl)
     });
   });

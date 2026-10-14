@@ -78,9 +78,11 @@ function callbackWithQuery(path: string, params: Record<string, string>): string
 }
 
 async function getTwilioDialPlan(
-  siteId: string,
+  siteId: string | null,
   trackingNumberId?: string | null
 ): Promise<TwilioDialTarget[]> {
+  const globalForwardTarget = config.TWILIO_FORWARD_TO ?? config.TWILIO_OPERATOR_NUMBER;
+  if (!siteId) return buildTwilioDialPlan(null, [], globalForwardTarget);
   let primarySupplierId: string | null = null;
   if (trackingNumberId) {
     const route = await db.query(
@@ -102,7 +104,7 @@ async function getTwilioDialPlan(
   const suppliers = result.rows as TwilioSupplierRoute[];
   const primary = suppliers.find((supplier) => supplier.supplierId === primarySupplierId) ?? null;
   const fallbacks = suppliers.filter((supplier) => supplier.supplierId !== primarySupplierId);
-  return buildTwilioDialPlan(primary, fallbacks, config.TWILIO_FORWARD_TO);
+  return buildTwilioDialPlan(primary, fallbacks, globalForwardTarget);
 }
 
 async function buildAutomaticDialResponse(
@@ -172,12 +174,11 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: "invalid_twilio_voice_payload" });
     }
     const site = await resolveSiteByNumber(call.calledNumber);
-    if (!site) return reply.code(422).send({ error: "site_resolution_failed" });
 
     const callId = await upsertIncomingCall({
-      siteId: site.id,
-      siteName: site.name,
-      hostname: site.hostname,
+      siteId: site?.id ?? null,
+      siteName: site?.name,
+      hostname: site?.hostname,
       provider: "twilio",
       providerCallId: call.providerCallId,
       callerNumber: call.callerNumber,
@@ -185,9 +186,9 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
       direction: call.direction,
       startedAt: call.startedAt ?? new Date().toISOString()
     });
-    await attributeCallToLead(callId, site.id, call.callerNumber, call.startedAt, call.calledNumber);
+    if (site?.id) await attributeCallToLead(callId, site.id, call.callerNumber, call.startedAt, call.calledNumber);
 
-    const plan = await getTwilioDialPlan(site.id, site.tracking_number_id);
+    const plan = await getTwilioDialPlan(site?.id ?? null, site?.tracking_number_id ?? null);
     if (!plan.length) {
       await db.query(
         "UPDATE calls SET status='failed',ended_at=NOW(),updated_at=NOW() WHERE id=$1",
@@ -199,7 +200,14 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
       return reply.type("text/xml; charset=utf-8").send(unavailable.toString());
     }
 
-    const xml = await buildAutomaticDialResponse(callId, call.calledNumber, plan, 0, true, String(site.name ?? "the website"));
+    const xml = await buildAutomaticDialResponse(
+      callId,
+      call.calledNumber,
+      plan,
+      0,
+      true,
+      String(site?.name ?? "the shared line (website not identified)")
+    );
     return reply.type("text/xml; charset=utf-8").send(xml);
   });
 
@@ -243,7 +251,7 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
       return reply.type("text/xml; charset=utf-8").send("<Response></Response>");
     }
 
-    const plan = await getTwilioDialPlan(String(call.site_id), call.tracking_number_id);
+    const plan = await getTwilioDialPlan(call.site_id ? String(call.site_id) : null, call.tracking_number_id);
     const nextIndex = attemptIndex + 1;
     if (nextIndex < plan.length) {
       await db.query(
@@ -527,11 +535,10 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
 
     if (!result.rowCount) {
       const site = await resolveSiteByNumber(call.calledNumber);
-      if (!site) return reply.code(422).send({ error: "site_resolution_failed" });
       const newCallId = await upsertIncomingCall({
-        siteId: site.id,
-        siteName: site.name,
-        hostname: site.hostname,
+        siteId: site?.id ?? null,
+        siteName: site?.name,
+        hostname: site?.hostname,
         provider: "twilio",
         providerCallId: call.providerCallId,
         callerNumber: call.callerNumber,
@@ -586,7 +593,7 @@ export async function registerTwilioRoutes(app: FastifyInstance) {
       const terminal = ["completed", "no-answer", "failed", "canceled"].includes(String(call.status ?? "").toLowerCase());
       let fallbackPending = false;
       if (requestedCallId && Number.isInteger(requestedAttemptIndex) && requestedAttemptIndex >= 0) {
-        const plan = await getTwilioDialPlan(String(call.site_id), call.tracking_number_id);
+        const plan = await getTwilioDialPlan(call.site_id ? String(call.site_id) : null, call.tracking_number_id);
         fallbackPending = !terminal && requestedAttemptIndex < plan.length - 1;
       }
       await db.query(

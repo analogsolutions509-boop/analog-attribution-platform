@@ -283,9 +283,9 @@ export function buildDashboardCallsListQuery(filters: DashboardListFilters = {})
   const sql = "SELECT c.id,c.provider,c.provider_call_id,c.caller_number,c.called_number,c.direction," +
     "c.started_at,c.ended_at,c.duration_seconds,c.status,c.recording_status,c.transcript_status," +
     "c.lead_id,c.attribution_confidence,c.attribution_method,c.created_at,s.id AS site_id," +
-    "s.name AS site_name,s.hostname,l.customer_name,l.company_name,l.customer_phone,l.customer_email," +
+    "COALESCE(s.name,'Unattributed / Shared Line') AS site_name,s.hostname,l.customer_name,l.company_name,l.customer_phone,l.customer_email," +
     "l.service_type,l.status AS lead_status,ci.summary,ci.intent,ci.urgency,ci.outcome,ci.lead_type," +
-    "COUNT(*) OVER()::int AS total_count FROM calls c JOIN sites s ON s.id=c.site_id " +
+    "COUNT(*) OVER()::int AS total_count FROM calls c LEFT JOIN sites s ON s.id=c.site_id " +
     "LEFT JOIN leads l ON l.id=c.lead_id LEFT JOIN call_intelligence ci ON ci.call_id=c.id " +
     "WHERE " + clauses.join(" AND ") +
     " ORDER BY COALESCE(c.started_at,c.created_at) DESC LIMIT " + limitParam + " OFFSET " + offsetParam;
@@ -316,8 +316,8 @@ export function buildDashboardRecordingsListQuery(filters: DashboardListFilters 
   const offsetParam = add(offset);
   const sql = "SELECT c.id,c.caller_number,c.called_number,c.direction,c.started_at,c.created_at," +
     "c.duration_seconds,c.recording_status,c.transcript_status,c.lead_id,s.id AS site_id," +
-    "s.name AS site_name,s.hostname,l.customer_name,l.customer_phone,ci.summary,ci.outcome,ci.lead_type," +
-    "COUNT(*) OVER()::int AS total_count FROM calls c JOIN sites s ON s.id=c.site_id " +
+    "COALESCE(s.name,'Unattributed / Shared Line') AS site_name,s.hostname,l.customer_name,l.customer_phone,ci.summary,ci.outcome,ci.lead_type," +
+    "COUNT(*) OVER()::int AS total_count FROM calls c LEFT JOIN sites s ON s.id=c.site_id " +
     "LEFT JOIN leads l ON l.id=c.lead_id LEFT JOIN call_intelligence ci ON ci.call_id=c.id WHERE " + clauses.join(" AND ") +
     " ORDER BY COALESCE(c.started_at,c.created_at) DESC LIMIT " + limitParam + " OFFSET " + offsetParam;
   return { sql, params, limit, offset };
@@ -608,8 +608,8 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
   app.get<{ Params: { callId: string } }>("/v1/dashboard/calls/:callId", async (request, reply) => {
     if (!(await requireDashboard(app, request, reply))) return;
     const callResult = await db.query(`
-      SELECT c.*,s.name AS site_name,s.hostname
-      FROM calls c JOIN sites s ON s.id=c.site_id WHERE c.id=$1 LIMIT 1
+      SELECT c.*,COALESCE(s.name,'Unattributed / Shared Line') AS site_name,s.hostname
+      FROM calls c LEFT JOIN sites s ON s.id=c.site_id WHERE c.id=$1 LIMIT 1
     `, [request.params.callId]);
     if (!callResult.rowCount) return reply.code(404).send({ error: "call_not_found" });
     const call = callResult.rows[0];
