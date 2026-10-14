@@ -31,7 +31,7 @@ export async function buildReport(filters:Filters={}){
     f.params
   );
   const daily=await db.query(
-    "SELECT TO_CHAR(DATE_TRUNC('day',l.created_at),'YYYY-MM-DD') day, COUNT(*)::int leads FROM leads l WHERE "+f.where+" GROUP BY 1 ORDER BY 1",
+    "SELECT TO_CHAR(DATE_TRUNC('day',l.created_at),'YYYY-MM-DD') AS \"day\", COUNT(*)::int leads FROM leads l WHERE "+f.where+" GROUP BY 1 ORDER BY 1",
     f.params
   );
   const suppliers=await db.query(

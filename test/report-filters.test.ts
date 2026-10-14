@@ -48,6 +48,7 @@ test("report build uses the parameterized filter builder", async () => {
   try {
     const report = await buildReport({ siteId: "site-1", start: "2026-10-01T00:00:00.000Z", end: "2026-10-14T00:00:00.000Z" });
     assert.equal(queries.length, 3);
+    assert.match(queries[1].sql, /AS "day"/);
     assert.ok(queries.every((query) => query.sql.includes("l.site_id=$3")));
     assert.deepEqual(report.kpi, { leads: 2, touched: 1, sales: 1 });
     assert.equal(report.daily.length, 1);
