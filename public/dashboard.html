@@ -217,6 +217,11 @@ body::before{content:"";position:fixed;inset:0;z-index:-3;pointer-events:none;ba
   </div>
   <div id="leadsTable"></div>
   <div class="toolbar" style="justify-content:center;margin-top:12px"><button id="loadMoreLeadsBtn" class="btn" type="button" hidden>Load more leads</button></div>
+</div>
+<div class="card" style="margin-top:14px">
+  <div class="top" style="margin-bottom:10px"><div><h2 style="margin:0">Analog OS — monthly historical leads</h2><p class="muted">Read-only archive sourced from OS Google Sheets. This list is separate from active Attribution leads; refresh does not create platform leads or trigger supplier routing.</p></div></div>
+  <div class="toolbar"><label class="muted">Month <input id="osMonth" type="month" aria-label="Analog OS month"></label><button id="osMonthlyRefreshBtn" class="btn primary" type="button">Refresh month</button></div>
+  <div id="osMonthlySummary" class="muted" style="margin:10px 0"></div><div id="osMonthlyTable"></div>
 </div></section>
 <section id="sitesView" hidden><div class="card"><h2>Websites & tracking</h2><p class="muted">This list is the Attribution registry. Automatic discovery across MainWP and Analog OS Portfolio, plus Google Search Console/GA4 SEO metrics, is not connected to this page yet; the detail view marks those sources as disconnected instead of inventing results.</p><div id="sitesTable"></div></div></section>
 <section id="numbersView" hidden>
@@ -266,7 +271,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-3;pointer-events:none;ba
 <div id="modal" class="modal"><div class="modal-box"><div class="modal-head"><div><h2 id="modalTitle" style="margin:0">Call</h2><div id="modalMeta" class="muted"></div></div><button id="closeModal" class="btn">Close</button></div><div id="modalBody" class="modal-body"></div></div></div>
 <div id="toast" class="toast"></div>
 <script>
-const state={siteId:"",summary:null,calls:[],callsHasMore:false,recordings:[],recordingsHasMore:false,leads:[],leadsHasMore:false,sites:[],numbers:[],system:null,leadFlow:null,auth0Enabled:false,user:null,reportPreview:null};
+const state={siteId:"",summary:null,calls:[],callsHasMore:false,recordings:[],recordingsHasMore:false,leads:[],leadsHasMore:false,sites:[],numbers:[],system:null,leadFlow:null,auth0Enabled:false,user:null,reportPreview:null,osMonthly:null,osMonthlyLoading:false};
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>c==="&"?"&amp;":c==="<"?"&lt;":c===">"?"&gt;":"&quot;");
 const fmtDate=s=>s?new Date(s).toLocaleString():"—";
@@ -419,6 +424,52 @@ function renderLeads(){
 }
 
 
+function currentOSMonth(){
+  const parts=new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/London",year:"numeric",month:"2-digit"}).formatToParts(new Date());
+  const year=parts.find(p=>p.type==="year")?.value,month=parts.find(p=>p.type==="month")?.value;
+  return year&&month?year+"-"+month:"";
+}
+function renderOSMonthly(){
+  const snapshot=state.osMonthly,host=$("#osMonthlyTable"),summary=$("#osMonthlySummary");
+  if(!snapshot){
+    summary.textContent=state.osMonthlyLoading?"Loading the signed Analog OS monthly export…":"Choose a month to view historical OS leads.";
+    host.innerHTML=state.osMonthlyLoading?'<div class="empty">Loading monthly history…</div>':'<div class="empty">Monthly history has not been loaded yet.</div>';
+    return;
+  }
+  const counts=snapshot.counts||{};
+  summary.textContent=Number(snapshot.lead_count??(snapshot.leads||[]).length)+" historical lead(s) • "+Number(counts.whatconverts||0)+" WhatConverts • "+Number(counts.email||0)+" email • Refreshed "+fmtDate(snapshot.refreshed_at)+(snapshot.cached?" • saved monthly snapshot":" • source export")+(snapshot.stale?" • refresh unavailable; showing last good snapshot":"");
+  const rows=Array.isArray(snapshot.leads)?snapshot.leads:[];
+  if(!rows.length){host.innerHTML='<div class="empty">The OS export contains no leads for this month.</div>';return;}
+  host.innerHTML='<div class="table-wrap"><table><thead><tr><th>Date</th><th>Source / OS ID</th><th>Website</th><th>Customer</th><th>Service / subject</th><th>Enquiry</th><th>Assigned client</th><th>Status</th><th>Quote / sale / commission</th></tr></thead><tbody>'+
+    rows.map(l=>'<tr><td>'+fmtDate(l.occurred_at)+'</td><td><b>'+esc(l.source||"—")+'</b><br><span class="muted">'+esc(l.os_lead_id||l.source_record||"—")+'</span></td><td>'+esc(l.website||"—")+'</td><td>'+esc(l.customer_name||"Unknown")+'<br><span class="muted">'+esc(l.customer_email||l.customer_phone||"")+'</span>'+phoneActions(l.customer_phone)+'</td><td>'+esc(l.service||l.subject||"—")+'</td><td style="min-width:220px;max-width:360px;white-space:normal">'+esc(l.enquiry||l.subject||"—")+'</td><td>'+esc(l.assigned_client||"—")+'</td><td>'+status(l.status)+'</td><td>'+esc([l.quote_value,l.sale_value,l.commission_due].filter(Boolean).join(" / ")||"—")+'</td></tr>').join("")+
+    '</tbody></table></div>';
+  attachPhoneActionHandlers(host);
+}
+async function loadOSMonthly(refresh=false){
+  if(state.osMonthlyLoading)return;
+  const month=$("#osMonth").value||currentOSMonth();
+  if(!month){toast("Choose a valid month.");return;}
+  state.osMonthlyLoading=true;
+  const button=$("#osMonthlyRefreshBtn");
+  if(button)button.disabled=true;
+  renderOSMonthly();
+  try{
+    const path="/v1/dashboard/analog-os/monthly?month="+encodeURIComponent(month)+(refresh?"&refresh=1":"");
+    const snapshot=await api(path);
+    state.osMonthly=snapshot;
+    renderOSMonthly();
+    if(snapshot.stale)toast("Could not refresh OS history; showing the last saved snapshot.");
+    else if(refresh)toast("Analog OS month refreshed.");
+  }catch(error){
+    state.osMonthly=null;
+    $("#osMonthlySummary").textContent="Analog OS monthly history is unavailable. No partial month was saved. Check the OS connection and try Refresh month again.";
+    $("#osMonthlyTable").innerHTML='<div class="empty">Could not verify all dates in this month. Existing OS and Attribution leads have not been changed.</div>';
+    toast(error?.message==="auth"?"Sign in again to view OS history.":"Analog OS monthly list unavailable.");
+  }finally{
+    state.osMonthlyLoading=false;
+    if(button)button.disabled=false;
+  }
+}
 function renderSites(){
   const el=$("#sitesTable"),rows=state.sites;
   if(!rows.length){el.innerHTML='<div class="empty">No sites registered in Attribution.</div>';return;}
@@ -593,6 +644,7 @@ function switchView(view){
   for(const name of ["overview","calls","recordings","leads","sites","numbers","system","reports"])$("#"+name+"View").hidden=name!==view;
   $("#pageTitle").textContent=view==="system"?"Settings":view[0].toUpperCase()+view.slice(1);
   document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("active",b.dataset.view===view));
+  if(view==="leads"&&!state.osMonthly&&!state.osMonthlyLoading)loadOSMonthly(false);
 }
 function buildCallsParams(offset=0){
   const p=new URLSearchParams({limit:"50",offset:String(offset)});
@@ -702,6 +754,10 @@ function bind(){
   $("#leadSearchBtn").onclick=()=>searchLeads().catch(()=>toast("Lead search failed"));
   $("#leadClearBtn").onclick=()=>{$("#leadSearch").value="";$("#leadChannel").value="";$("#leadStatus").value="";$("#leadStart").value="";$("#leadEnd").value="";loadAll();};
   $("#loadMoreLeadsBtn").onclick=loadMoreLeads;
+  $("#osMonth").value=currentOSMonth();
+  $("#osMonth").max=currentOSMonth();
+  $("#osMonth").onchange=()=>{state.osMonthly=null;loadOSMonthly(false);};
+  $("#osMonthlyRefreshBtn").onclick=()=>loadOSMonthly(true);
   document.querySelectorAll(".nav button").forEach(b=>b.onclick=()=>switchView(b.dataset.view));
   $("#reportStart").onchange=()=>loadReportPreview().catch(()=>toast("Report preview failed"));
   $("#reportEnd").onchange=()=>loadReportPreview().catch(()=>toast("Report preview failed"));

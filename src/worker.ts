@@ -6,6 +6,7 @@ import { archiveRecording, completeTranscript, queueCallCompletionNotifications 
 import { downloadRecording, extensionForMimeType } from "./call-recording.js";
 import { transcribeBytes } from "./call-intelligence/transcribe.js";
 import { deliverAnalogOSEvent } from "./analog-os.js";
+import { ensureMonthlyAnalogOSSnapshots } from "./analog-os-monthly.js";
 import { markAnalogOSEventAttempt, markAnalogOSEventSent, recoverAnalogOSEvents } from "./analog-os-outbox.js";
 import { config } from "./config.js";
 import { attributeCallToLead, createLead } from "./leads.js";
@@ -306,12 +307,21 @@ async function handle(job: JobEnvelope) {
 let stopping = false;
 
 let lastCollectorEventRepairCheckAt = 0;
+let lastAnalogOSMonthRefreshCheckAt = 0;
+let analogOSMonthRefreshInProgress = false;
 process.on("SIGINT", () => { stopping = true; });
 process.on("SIGTERM", () => { stopping = true; });
 
 while (!stopping) {
   await recoverJobs();
   await recoverAnalogOSEvents().catch(() => undefined);
+  if (Date.now() - lastAnalogOSMonthRefreshCheckAt >= 6 * 60 * 60 * 1000 && !analogOSMonthRefreshInProgress) {
+    lastAnalogOSMonthRefreshCheckAt = Date.now();
+    analogOSMonthRefreshInProgress = true;
+    void ensureMonthlyAnalogOSSnapshots()
+      .catch((error) => console.error("[analog-os-monthly] snapshot refresh failed", error instanceof Error ? error.message : "unknown"))
+      .finally(() => { analogOSMonthRefreshInProgress = false; });
+  }
   if (Date.now() - lastCollectorEventRepairCheckAt >= 60_000) {
     lastCollectorEventRepairCheckAt = Date.now();
     await recoverDeadLetterCollectorEventJobs(25).catch(() => undefined);

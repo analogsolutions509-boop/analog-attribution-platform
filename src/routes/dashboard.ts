@@ -7,7 +7,8 @@ import { verifyDashboardCredentials, createDashboardSession, verifyDashboardSess
 import { getDashboardAccessMessage, isAllowedDashboardEmail } from "../dashboard-access.js";
 import { createRecordingDownloadUrl } from "../storage/r2.js";
 import { createJob } from "../jobs.js";
-import { getAnalogOSReconciliationStatus, getLondonDateKey, getReadOnlyAnalogOSContext, validateReconciliationDate } from "../analog-os-reconciliation.js";
+import { getAnalogOSReconciliationStatus, getLondonDateKey, getLondonMonthKey, getReadOnlyAnalogOSContext, validateReconciliationDate, validateReconciliationMonth } from "../analog-os-reconciliation.js";
+import { getAnalogOSMonthlySnapshot } from "../analog-os-monthly.js";
 
 const COOKIE_NAME = "analog_dashboard_session";
 const UI_ROOT = join(process.cwd(), "public");
@@ -728,6 +729,34 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
     if (request.query.siteId) params.push(request.query.siteId);
     const result = await db.query(buildDashboardNumbersQuery(Boolean(request.query.siteId)), params);
     return reply.send({ numbers: result.rows });
+  });
+
+  app.get<{ Querystring: { month?: string; refresh?: string } }>("/v1/dashboard/analog-os/monthly", async (request, reply) => {
+    if (!(await requireDashboard(app, request, reply))) return;
+    const requestedMonth = typeof request.query.month === "string" ? request.query.month : getLondonMonthKey();
+    let month: string;
+    try {
+      month = validateReconciliationMonth(requestedMonth);
+    } catch {
+      return reply.code(400).send({ error: "invalid_reconciliation_month" });
+    }
+    if (month > getLondonMonthKey()) {
+      return reply.code(400).send({ error: "future_month_not_allowed" });
+    }
+
+    try {
+      const snapshot = await getAnalogOSMonthlySnapshot(month, {
+        refresh: request.query.refresh === "1" || request.query.refresh === "true"
+      });
+      return reply.send(snapshot);
+    } catch (error) {
+      request.log.warn({ month, reason: error instanceof Error ? error.message : "unknown" }, "Analog OS monthly export unavailable");
+      return reply.code(502).send({
+        error: "analog_os_month_unavailable",
+        month,
+        message: "The full month could not be verified. No partial monthly snapshot was saved."
+      });
+    }
   });
 
   app.post("/v1/dashboard/analog-os/reconcile", async (request, reply) => {
