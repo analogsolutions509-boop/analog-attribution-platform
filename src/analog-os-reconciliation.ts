@@ -210,6 +210,29 @@ function getPullUrl(): string {
  * Fetch a signed, date-scoped export from Analog OS. This request only reads the
  * source export; it does not update Google Sheets or the Attribution database.
  */
+export function classifyAnalogOSPullFailure(error: unknown): string {
+  const name = error instanceof Error ? error.name : "";
+  const message = error instanceof Error ? error.message : "";
+  const knownCodes = new Set([
+    "analog_os_pull_secret_missing",
+    "analog_os_pull_url_missing",
+    "analog_os_pull_invalid_json",
+    "analog_os_pull_invalid_response",
+    "analog_os_pull_invalid_signature"
+  ]);
+  if (knownCodes.has(message)) return message;
+  const statusMatch = /^analog_os_pull_failed:(\d{3})$/.exec(message);
+  if (statusMatch) return "analog_os_pull_http_" + statusMatch[1];
+  if (name === "TimeoutError" || name === "AbortError" || /timeout|timed out|aborted/i.test(message)) {
+    return "analog_os_pull_timeout";
+  }
+  if (name === "TypeError" && /fetch failed|network|socket/i.test(message)) {
+    return "analog_os_pull_network_error";
+  }
+  if (name === "SyntaxError") return "analog_os_pull_invalid_json";
+  return "analog_os_pull_failed_unknown";
+}
+
 async function fetchOSLeadsReadOnly(dateInput: string): Promise<AnalogOSLeadExport> {
   const date = validateReconciliationDate(dateInput);
   const secret = getPullSecret();
@@ -222,7 +245,12 @@ async function fetchOSLeadsReadOnly(dateInput: string): Promise<AnalogOSLeadExpo
     signal: AbortSignal.timeout(5000)
   });
   if (!response.ok) throw new Error("analog_os_pull_failed:" + response.status);
-  const raw = await response.json() as Partial<AnalogOSLeadExport>;
+  let raw: Partial<AnalogOSLeadExport>;
+  try {
+    raw = await response.json() as Partial<AnalogOSLeadExport>;
+  } catch {
+    throw new Error("analog_os_pull_invalid_json");
+  }
   const signedPayload = {
     ok: Boolean(raw.ok),
     date: validateReconciliationDate(String(raw.date || "")),
@@ -327,6 +355,7 @@ export async function getReadOnlyAnalogOSMonth(monthInput: string, now = new Dat
   const dates = getMonthDateKeys(month, now);
   const exports: Array<AnalogOSLeadExport | undefined> = new Array(dates.length);
   const failures: string[] = [];
+  const failureReasons = new Map<string, number>();
   let next = 0;
   const concurrency = Math.min(8, dates.length);
   await Promise.all(Array.from({ length: concurrency }, async () => {
@@ -337,14 +366,20 @@ export async function getReadOnlyAnalogOSMonth(monthInput: string, now = new Dat
       if (!date) continue;
       try {
         exports[index] = await fetchOSLeadsReadOnly(date);
-      } catch {
+      } catch (error) {
         failures.push(date);
+        const reason = classifyAnalogOSPullFailure(error);
+        failureReasons.set(reason, (failureReasons.get(reason) ?? 0) + 1);
       }
     }
   }));
 
   if (failures.length) {
-    throw new Error("analog_os_month_pull_incomplete:" + failures.sort().join(","));
+    const reasonSummary = [...failureReasons.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([reason, count]) => reason + "=" + count)
+      .join(",");
+    throw new Error("analog_os_month_pull_incomplete:reasons=" + reasonSummary + ";count=" + failures.length);
   }
 
   const verifiedExports = exports.filter((item): item is AnalogOSLeadExport => Boolean(item));

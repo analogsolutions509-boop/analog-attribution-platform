@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  classifyAnalogOSPullFailure,
   dedupeAnalogOSMonthLeads,
   getMonthDateKeys,
   getPreviousLondonMonthKey,
@@ -89,4 +90,15 @@ test("dashboard has a separate selectable monthly OS history list and refresh co
   assert.match(html, /function loadOSMonthly\(refresh=false\)/);
   assert.match(html, /view==="leads"[^\n]*loadOSMonthly\(false\)/);
   assert.match(html, /refresh\?"&refresh=1":""/);
+});
+
+
+test("classifies Analog OS pull failures into safe diagnostic codes", () => {
+  assert.equal(classifyAnalogOSPullFailure(new Error("analog_os_pull_invalid_signature")), "analog_os_pull_invalid_signature");
+  assert.equal(classifyAnalogOSPullFailure(new Error("analog_os_pull_failed:503")), "analog_os_pull_http_503");
+  const timeout = new Error("request timed out");
+  timeout.name = "TimeoutError";
+  assert.equal(classifyAnalogOSPullFailure(timeout), "analog_os_pull_timeout");
+  assert.equal(classifyAnalogOSPullFailure(new TypeError("fetch failed")), "analog_os_pull_network_error");
+  assert.equal(classifyAnalogOSPullFailure(new Error("sensitive URL and secret details")), "analog_os_pull_failed_unknown");
 });
